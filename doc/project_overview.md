@@ -52,6 +52,8 @@ monitor/
 │   ├── Watch.js       # 每轮执行：并发 ping 所有任务 → statusWatch
 │   ├── ping.js        # 单次探测：线程池执行 → 成功/失败处理
 │   ├── statusWatch.js # 监控自身：检查 cloudflare monitor-watch 是否存活
+│   ├── stateBuild.js  # 纯函数：TASK + ERR + VPS_ID_IP → 状态快照对象（无 import，可单测）
+│   ├── stateSnapshot.js # 状态快照写 Redis `status:state`（薄写入层）
 │   ├── send.js        # 告警发送
 │   ├── DB.js          # PostgreSQL 连接（Bun.sql），导出 q / isDup
 │   ├── R.js           # Redis 连接
@@ -132,6 +134,7 @@ watch()
     → 成功 + 无异常 → log ✅
     → 失败 + 与上次相同错误文本 → 跳过（不重复告警）
     → 失败 + 新错误 → errIngNew（upsert errIng → 推送 ❌）
+  → stateSnapshot()：全量状态快照写 Redis status:state（供 monitor-watch 状态页读取）
   → statusWatch():
     → 读 Redis key `status-watch:ts`，检查 cloudflare status-watch 最后心跳
     → 写 `status:ts` 作为自身心跳

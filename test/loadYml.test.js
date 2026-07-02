@@ -19,15 +19,13 @@ test("缺失变量报错", () => {
 });
 
 test("conf/watch.yml 占位符可全部解析", () => {
+  // conf/ 不入仓且监控项会增减，测试不假设具体条目：动态提取占位符名构造假环境
   const watch = ymlLoad(join(dirname(import.meta.dirname), "conf", "watch.yml"));
-  const fake = { SENTINEL_PASSWORD: "sp", IPV6_PROXY_AUTH: "user:pass", SMTP_PASSWORD: "mp" };
+  const raw = JSON.stringify(watch),
+    fake = Object.fromEntries([...raw.matchAll(/\$\{(\w+)\}/g)].map(([, k]) => [k, "v_" + k]));
   envRef(watch, fake);
 
-  const [sentinel] = Object.entries(watch).filter(([k]) => k.startsWith("redis_sentinel"));
-  expect(sentinel[1].password).toBe("sp");
-  expect(watch.ipv6_proxy.auth).toBe("user:pass");
-  const [smtp] = Object.entries(watch).filter(([k]) => k.startsWith("smtp"));
-  expect(smtp[1].password).toBe("mp");
+  expect(Object.keys(watch).length).toBeGreaterThan(0);
   // 整棵树不再残留占位符
   expect(JSON.stringify(watch)).not.toContain("${");
 });
