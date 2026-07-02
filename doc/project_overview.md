@@ -8,16 +8,16 @@
 
 ## 技术栈
 
-| 分类   | 技术                                                                                             |
-| ------ | ------------------------------------------------------------------------------------------------ |
-| 运行时 | **Bun**（非 Node，因 fetch 需要 proxy 参数；DB 驱动用内置 `Bun.sql`）                            |
-| 数据库 | **PostgreSQL**（`Bun.sql` 原生驱动，零额外依赖，库名 `status`）                                  |
-| 缓存   | **Redis**（ioredis）                                                                             |
-| 线程池 | **Piscina**（每种探测任务在 worker 线程执行，idle 90s）                                          |
-| 配置   | `.env`（唯一秘密来源）+ `conf/watch.yml`（秘密用 `${VAR}` 占位符）+ `conf/ip.json`；conf/ 不入仓 |
-| 告警   | `@8v/send`（飞书 Lark + PushPlus 双通道，至少配一个）                                            |
-| 部署   | systemd service，`deploy.sh` SSH 到 VPS 拉代码 + scp .env 和 conf/ + 重启                        |
-| 开发   | `watchexec` 监听 `src/*.js` 变动，自动 `oxfmt` → `oxlint` → 运行                                 |
+| 分类   | 技术                                                                                                |
+| ------ | --------------------------------------------------------------------------------------------------- |
+| 运行时 | **Bun**（非 Node，因 fetch 需要 proxy 参数；DB 驱动用内置 `Bun.sql`）                               |
+| 数据库 | **PostgreSQL**（`Bun.sql` 原生驱动，零额外依赖，库名 `status`）                                     |
+| 缓存   | **Redis**（ioredis）                                                                                |
+| 线程池 | **Piscina**（每种探测任务在 worker 线程执行，idle 90s）                                             |
+| 配置   | `.env`（唯一秘密来源）+ `conf/watch.yml`（秘密用 `${VAR}` 占位符）+ `conf/ip.json`；conf/ 不入仓    |
+| 告警   | 飞书交互卡片（`src/larkCard.js`，emoji 定色，页脚带状态页链接）+ PushPlus（`@8v/send`），至少配一个 |
+| 部署   | systemd service，`deploy.sh` SSH 到 VPS 拉代码 + scp .env 和 conf/ + 重启                           |
+| 开发   | `watchexec` 监听 `src/*.js` 变动，自动 `oxfmt` → `oxlint` → 运行                                    |
 
 ---
 
@@ -28,7 +28,7 @@
   - `REDIS_*`：Redis 连接
   - `LARK` / `PUSHPLUS` + `PUSHPLUS_TOPIC`：告警通道（至少一个）
   - `GOOGLE_TRAN`：Google 翻译 API Key（ipv6_proxy 探测用）
-  - `SENTINEL_PASSWORD` / `IPV6_PROXY_AUTH` / `SMTP_PASSWORD`：watch.yml 占位符引用；`DEPLOY_VPS`：部署目标
+  - `SENTINEL_PASSWORD` / `IPV6_PROXY_AUTH` / `SMTP_PASSWORD`：watch.yml 占位符引用；`DEPLOY_VPS`：部署目标；`STATUS_PAGE`：状态页完整 URL（告警卡片页脚，可留空）
 - **加载机制**：bun 启动时自动加载工作目录下的 `.env`（dev 与 systemd 均依赖此机制，`monitor.service` 的 `WorkingDirectory=/opt/monitor`）；`src/env.js` 统一装配并校验（缺关键项启动即报错），装配逻辑在 `src/loadEnv.js`（纯函数，可测）。
 - **`conf/`（不入仓——仓库公开，含真实 IP 与监控拓扑；deploy.sh 部署时随 `.env` 一起 scp）**：`watch.yml`（监控拓扑，密码写成 `${SENTINEL_PASSWORD}` 等占位符，由 `src/loadYml.js` 的 `envRef` 在解析后递归替换）+ `ip.json`（VPS 主机名 → IP）。
 - 本地开发数据库：docker 容器 `status-pg`（postgres:16，端口 127.0.0.1:5432，volume `status-pg-data`）。
@@ -55,7 +55,8 @@ monitor/
 │   ├── stateBuild.js  # 纯函数：TASK + ERR + VPS_ID_IP + OK_SINCE → 状态快照对象（无 import，可单测）
 │   ├── uptimeBuild.js # 纯函数：errFixed/errIng + srv.ctime → 近 90 天每日可用率（东八区日界）
 │   ├── stateSnapshot.js # 快照（含 up 可用率）写 Redis `status:state`
-│   ├── send.js        # 告警发送
+│   ├── send.js        # 告警发送（飞书卡片 + PushPlus，任一失败抛错）
+│   ├── larkCard.js    # 飞书交互卡片：❌红 ✅绿 ⚠️橙 默认蓝，页脚 = STATUS_PAGE 链接
 │   ├── DB.js          # PostgreSQL 连接（Bun.sql），导出 q / isDup
 │   ├── R.js           # Redis 连接
 │   ├── loadYml.js     # 从 conf/ 加载 YAML + ${VAR} 环境变量插值
@@ -88,13 +89,13 @@ monitor/
 
 建表见 `backup/schema.sql`。标识符一律不加引号（PG 折叠小写，代码里的 `errIng` 实为 `erring` 表）。
 
-| 表         | 用途           | 关键字段                                   |
-| ---------- | -------------- | ------------------------------------------ |
-| `vps`      | VPS 节点       | hostname（唯一）、ip（bytea）              |
+| 表         | 用途           | 关键字段                                                                      |
+| ---------- | -------------- | ----------------------------------------------------------------------------- |
+| `vps`      | VPS 节点       | hostname（唯一）、ip（bytea）                                                 |
 | `srv`      | 服务名         | val（唯一，如 `redis_sentinel/cluster-a`）、ctime（首次注册秒，观测窗口起点） |
-| `txt`      | 错误文本去重   | hash（blake2b256，bytea 唯一）、val        |
-| `errIng`   | 正在发生的异常 | vps_id + srv_id（联合唯一）、txt_id、ts    |
-| `errFixed` | 已恢复的异常   | id 沿用 errIng（非自增）+ begin、duration  |
+| `txt`      | 错误文本去重   | hash（blake2b256，bytea 唯一）、val                                           |
+| `errIng`   | 正在发生的异常 | vps_id + srv_id（联合唯一）、txt_id、ts                                       |
+| `errFixed` | 已恢复的异常   | id 沿用 errIng（非自增）+ begin、duration                                     |
 
 DB 层约定（`src/DB.js`）：
 

@@ -24,6 +24,7 @@ export default (env) => {
     },
     LARK: env.LARK,
     PUSHPLUS: env.PUSHPLUS ? [env.PUSHPLUS, env.PUSHPLUS_TOPIC] : undefined,
+    STATUS_PAGE: env.STATUS_PAGE,
     GOOGLE_TRAN: need(env, "GOOGLE_TRAN"),
   };
   if (!conf.LARK && !conf.PUSHPLUS) {

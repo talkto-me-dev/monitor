@@ -13,7 +13,7 @@ const TASK = new Map(),
     try {
       await Watch(TASK);
     } catch (e) {
-      await send("监控异常", e);
+      await send("❌ 监控异常", e);
     }
   };
 
