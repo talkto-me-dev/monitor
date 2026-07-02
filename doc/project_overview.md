@@ -74,10 +74,9 @@ monitor/
 │   └── var/           # 线程池与 worker 入口
 ├── backup/
 │   ├── schema.sql     # PostgreSQL 建表（新库初始化用）
-│   ├── migrate.js     # 一次性 TiDB → PG 数据迁移（可重复执行）
 │   └── dump.sh        # pg_dump 导出表结构
 ├── test/              # bun test 单元测试 + R.js 手工冒烟
-├── deploy.sh          # 部署：拉代码 + scp .env + 重启
+├── deploy.sh          # 部署：拉代码 + scp .env 和 conf/ + 重启
 ├── dev.sh             # 开发热重载（项目根运行，bun 自动加载 .env）
 ├── log.sh             # 查看 journalctl 日志
 └── monitor.service    # systemd 服务配置（无需 EnvironmentFile）
@@ -163,9 +162,9 @@ watch()
 
 - 部署目标：`.env` 的 `DEPLOY_VPS`（ssh 别名）
 - 服务器路径：`/opt/monitor`；代码托管 `github.com:talkto-me-dev/monitor.git`（`main` 分支）
-- 流程：`deploy.sh` → SSH 拉代码 → `scp .env` 到 `/opt/monitor/.env`（chmod 600）→ `bun i` → `systemctl restart monitor`
+- 流程：`deploy.sh` → SSH 拉代码 → `scp .env` 与 `conf/` 到 `/opt/monitor/`（.env chmod 600）→ `bun i` → `systemctl restart monitor`
 - systemd：`monitor.service`，`WorkingDirectory=/opt/monitor`，bun 自动加载该目录下 `.env`，无需 EnvironmentFile；首次安装见 deploy.sh 尾部注释（含旧 status 服务退役步骤）
-- **服务器首次切换 PG（顺序不能乱）**：① `psql < backup/schema.sql` 建库 → ② 保持 status 服务未启动（或先 `systemctl stop status`）→ ③ 如需保留 TiDB 历史数据跑 `MYSQL_URL=... bun backup/migrate.js`（迁移必须先于应用首次写入，否则新旧 id 错位；脚本检测到目标库已有数据会拒绝，确认无误可加 `--force`；自动校正自增序列，errIng 序列会同时越过 errFixed 的历史 id）→ ④ 再启动服务/执行 deploy.sh
+- 全新数据库初始化：`psql < backup/schema.sql`（历史上曾有 TiDB→PG 迁移脚本 backup/migrate.js，2026-07 全新上线未迁移历史数据，已删除）
 
 ---
 
