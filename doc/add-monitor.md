@@ -18,7 +18,7 @@ conf/watch.yml
 顶层键格式 `srv类型` 或 `srv类型/tag`（tag 用于区分同一类型的不同监控组，如 `smtp/smtp.example.com`）。值是任意参数对象 + `vps` 主机名列表：
 
 ```yaml
-http/api.example.com:        # srv=http，tag=api.example.com
+http/api.example.com: # srv=http，tag=api.example.com
   port: 8080
   path: /health
   token: ${HTTP_HEALTH_TOKEN} # 秘密一律写 ${VAR} 占位符
@@ -50,10 +50,10 @@ push([tag, vps, ...ping_args])
 
 `vps` 的两种形态决定告警粒度：
 
-| 形态 | 行为 | 现有例子 |
-|---|---|---|
-| 单个主机名字符串（每台 push 一次） | 每台独立探测、独立告警/恢复 | `ipv6_proxy` |
-| 主机名数组（整组 push 一次） | 整组一次探测，异常挂在 `vps[0]` 名下，展示名用 `&` 连接 | `redis_sentinel`、`smtp` |
+| 形态                               | 行为                                                    | 现有例子                 |
+| ---------------------------------- | ------------------------------------------------------- | ------------------------ |
+| 单个主机名字符串（每台 push 一次） | 每台独立探测、独立告警/恢复                             | `ipv6_proxy`             |
+| 主机名数组（整组 push 一次）       | 整组一次探测，异常挂在 `vps[0]` 名下，展示名用 `&` 连接 | `redis_sentinel`、`smtp` |
 
 两种典型写法（都是真实代码）：
 

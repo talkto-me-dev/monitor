@@ -1,7 +1,8 @@
-import { blake3 } from "@3-/blake3";
 import DB from "../DB.js";
 
-// 文本 → txt 表 id（按 blake3 hash 去重）
+// 文本 → txt 表 id（按 blake2b256 hash 去重，Bun 内置，无原生依赖）
+
+const blake2b = (txt) => new Bun.CryptoHasher("blake2b256").update(txt).digest();
 
 const qId = async (hash) => {
   const [id] = await DB.q("SELECT id FROM txt WHERE hash=$1", hash);
@@ -9,7 +10,7 @@ const qId = async (hash) => {
 };
 
 export default async (txt) => {
-  const hash = blake3(txt),
+  const hash = blake2b(txt),
     id = await qId(hash);
   if (id) return id;
   try {

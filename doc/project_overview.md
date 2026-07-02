@@ -8,16 +8,16 @@
 
 ## 技术栈
 
-| 分类   | 技术                                                                                     |
-| ------ | ---------------------------------------------------------------------------------------- |
-| 运行时 | **Bun**（非 Node，因 fetch 需要 proxy 参数；DB 驱动用内置 `Bun.sql`）                    |
-| 数据库 | **PostgreSQL**（`Bun.sql` 原生驱动，零额外依赖，库名 `status`）                          |
-| 缓存   | **Redis**（ioredis）                                                                     |
-| 线程池 | **Piscina**（每种探测任务在 worker 线程执行，idle 90s）                                  |
+| 分类   | 技术                                                                                             |
+| ------ | ------------------------------------------------------------------------------------------------ |
+| 运行时 | **Bun**（非 Node，因 fetch 需要 proxy 参数；DB 驱动用内置 `Bun.sql`）                            |
+| 数据库 | **PostgreSQL**（`Bun.sql` 原生驱动，零额外依赖，库名 `status`）                                  |
+| 缓存   | **Redis**（ioredis）                                                                             |
+| 线程池 | **Piscina**（每种探测任务在 worker 线程执行，idle 90s）                                          |
 | 配置   | `.env`（唯一秘密来源）+ `conf/watch.yml`（秘密用 `${VAR}` 占位符）+ `conf/ip.json`；conf/ 不入仓 |
-| 告警   | `@8v/send`（飞书 Lark + PushPlus 双通道，至少配一个）                                    |
-| 部署   | systemd service，`deploy.sh` SSH 到 VPS 拉代码 + scp .env 和 conf/ + 重启                |
-| 开发   | `watchexec` 监听 `src/*.js` 变动，自动 `oxfmt` → `oxlint` → 运行                         |
+| 告警   | `@8v/send`（飞书 Lark + PushPlus 双通道，至少配一个）                                            |
+| 部署   | systemd service，`deploy.sh` SSH 到 VPS 拉代码 + scp .env 和 conf/ + 重启                        |
+| 开发   | `watchexec` 监听 `src/*.js` 变动，自动 `oxfmt` → `oxlint` → 运行                                 |
 
 ---
 
@@ -65,7 +65,7 @@ monitor/
 │   │   ├── VPS_ID_IP.js   # hostname → [id, ip]（启动时同步到 DB）
 │   │   ├── VPS_IP.js / VPS_IP_NAME.js
 │   │   ├── srvId.js       # 服务名 → id
-│   │   ├── txtId.js       # 错误文本 → id（blake3 去重，原 @3-/txt_id 内联）
+│   │   ├── txtId.js       # 错误文本 → id（blake2b256 去重，Bun 内置 hash，原 @3-/txt_id 内联）
 │   │   └── valId.js       # 通用 val→id（原 @3-/val_id 内联）
 │   └── var/           # 线程池与 worker 入口
 ├── backup/
@@ -85,13 +85,13 @@ monitor/
 
 建表见 `backup/schema.sql`。标识符一律不加引号（PG 折叠小写，代码里的 `errIng` 实为 `erring` 表）。
 
-| 表         | 用途           | 关键字段                                    |
-| ---------- | -------------- | ------------------------------------------- |
-| `vps`      | VPS 节点       | hostname（唯一）、ip（bytea）               |
-| `srv`      | 服务名         | val（唯一，如 `redis_sentinel/cluster-a`）  |
-| `txt`      | 错误文本去重   | hash（blake3，bytea 唯一）、val             |
-| `errIng`   | 正在发生的异常 | vps_id + srv_id（联合唯一）、txt_id、ts     |
-| `errFixed` | 已恢复的异常   | id 沿用 errIng（非自增）+ begin、duration   |
+| 表         | 用途           | 关键字段                                   |
+| ---------- | -------------- | ------------------------------------------ |
+| `vps`      | VPS 节点       | hostname（唯一）、ip（bytea）              |
+| `srv`      | 服务名         | val（唯一，如 `redis_sentinel/cluster-a`） |
+| `txt`      | 错误文本去重   | hash（blake2b256，bytea 唯一）、val        |
+| `errIng`   | 正在发生的异常 | vps_id + srv_id（联合唯一）、txt_id、ts    |
+| `errFixed` | 已恢复的异常   | id 沿用 errIng（非自增）+ begin、duration  |
 
 DB 层约定（`src/DB.js`）：
 
