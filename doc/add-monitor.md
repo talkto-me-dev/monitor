@@ -18,7 +18,7 @@ conf/watch.yml
 顶层键格式 `srv类型` 或 `srv类型/tag`（tag 用于区分同一类型的不同监控组，如 `smtp/smtp.example.com`）。值是任意参数对象 + `vps` 主机名列表：
 
 ```yaml
-http/api.example.com: # srv=http，tag=api.example.com
+health/api.example.com: # srv=health，tag=api.example.com（虚构示例；真实的 http/ssl 外部域名探测见 src/ping/）
   port: 8080
   path: /health
   token: ${HTTP_HEALTH_TOKEN} # 秘密一律写 ${VAR} 占位符
@@ -50,10 +50,14 @@ push([tag, vps, ...ping_args])
 
 `vps` 的两种形态决定告警粒度：
 
-| 形态                               | 行为                                                    | 现有例子                 |
-| ---------------------------------- | ------------------------------------------------------- | ------------------------ |
-| 单个主机名字符串（每台 push 一次） | 每台独立探测、独立告警/恢复                             | `ipv6_proxy`             |
-| 主机名数组（整组 push 一次）       | 整组一次探测，异常挂在 `vps[0]` 名下，展示名用 `&` 连接 | `redis_sentinel`、`smtp` |
+| 形态                               | 行为                                                    | 现有例子                                |
+| ---------------------------------- | ------------------------------------------------------- | --------------------------------------- |
+| 单个主机名字符串（每台 push 一次） | 每台独立探测、独立告警/恢复                             | `ipv6_proxy`                            |
+| 主机名数组（整组 push 一次）       | 整组一次探测，异常挂在 `vps[0]` 名下，展示名用 `&` 连接 | `redis_sentinel`、`smtp`、`http`、`ssl` |
+
+`vps` 的语义是**归属/落点**（异常记录挂谁名下），不要求真的是探测目标。uptime 风格的外部域名探测（`http`/`ssl`）与机器无关，**域名本身即落点**，经 `vpsEnsure`（`src/db/VPS_ID_IP.js`）以占位 IP 自动注册为逻辑节点（**ip.json 只放真实机器**）。两种 yml 写法（见 `SRV.js` 的 `domainSrv`）：裸键单域名 `http/api.example.com:`（可用率独立一行），或分组 `http/backend: {host: [...]}`（每域名独立探测/告警，可用率按顶层键合并一行）。
+
+**错误文本必须稳定**：去重靠文本比较（`errIngNew.js`），文本里不要带每次变化的值（实测耗时、随机 ID、时间戳），否则同一异常每轮都会重新告警。
 
 两种典型写法（都是真实代码）：
 
@@ -94,10 +98,10 @@ redis_sentinel: (tag, push, args) => {
 - 超时不用自己管：`ping.js` 有统一的 30 秒 AbortController，超时记为 `timeout`
 - 需要读 `.env` 的配置（如 API key）可以直接 `import { XXX } from "../env.js"`（worker 线程与主进程共享环境变量），新键记得在 `src/loadEnv.js` 里加校验
 
-示例（配合上面 yml 与 SRV 的 http 例子）：
+示例（配合上面 yml 与 SRV 的 health 例子）：
 
 ```js
-// src/ping/http.js
+// src/ping/health.js
 import raise from "@3-/raise";
 
 export default async (ip, port, path, token) => {
@@ -113,7 +117,7 @@ export default async (ip, port, path, token) => {
 对应的 SRV.js handler：
 
 ```js
-http: (_tag, push, args) => {
+health: (_tag, push, args) => {
   const { port, path, token } = args;
   args.vps.map((vps) => {
     push([, vps, VPS_ID_IP.get(vps)[1], port, path, token]);
@@ -124,7 +128,7 @@ http: (_tag, push, args) => {
 ## 第 4 步：验证
 
 1. `bun test` —— 确认 yml 占位符、loadEnv 校验没被改坏
-2. `./dev.sh` 跑一轮，看日志出现 `✅ http:vps-01` / `❌ ...`（**dev 会真实推送告警**；调试期可以 `LARK=http://127.0.0.1:1/hook ./dev.sh` 让告警发不出去，或起个本地 mock）
+2. `./dev.sh` 跑一轮，看日志出现 `✅ health:vps-01` / `❌ ...`（**dev 会真实推送告警**；调试期可以 `LARK=http://127.0.0.1:1/hook ./dev.sh` 让告警发不出去，或起个本地 mock）
 3. 确认 DB：`srv` 表自动多了一行（键名），异常时 `errIng` 有记录、恢复后转移到 `errFixed`
 4. 故意把端口改错验证一次告警 + 改回来验证恢复通知，再交付
 

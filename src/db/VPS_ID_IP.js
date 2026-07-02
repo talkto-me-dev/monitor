@@ -43,4 +43,16 @@ await (async () => {
   });
 })();
 
+// 逻辑归属节点（如 http/ssl 的默认落点 www）：不在 ip.json（那里只放真实机器），
+// 首次引用时以占位 IP 注册进 vps 表，仅作异常记录/展示的挂靠点
+export const vpsEnsure = async (hostname, ip = "0.0.0.0") => {
+  if (VPS_ID_IP.has(hostname)) return;
+  const [[id]] = await DB.q(
+    "INSERT INTO vps(hostname,ip) VALUES ($1,$2) ON CONFLICT (hostname) DO UPDATE SET ip=EXCLUDED.ip RETURNING id",
+    hostname,
+    ipBin(ip),
+  );
+  VPS_ID_IP.set(hostname, [id, ip]);
+};
+
 export default VPS_ID_IP;

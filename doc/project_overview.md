@@ -48,7 +48,7 @@ monitor/
 │   ├── main.js        # 入口：加载配置 → 注册任务 → 60s 轮询
 │   ├── env.js         # 环境变量统一装配（fail-fast）
 │   ├── loadEnv.js     # env → 配置对象（纯函数）
-│   ├── SRV.js         # 服务注册表：ipv6_proxy / redis_sentinel / smtp
+│   ├── SRV.js         # 服务注册表：ipv6_proxy / redis_sentinel / smtp / http / ssl
 │   ├── Watch.js       # 每轮执行：并发 ping 所有任务 → statusWatch
 │   ├── ping.js        # 单次探测：线程池执行 → 成功/失败处理
 │   ├── statusWatch.js # 监控自身：检查 cloudflare monitor-watch 是否存活
@@ -111,11 +111,15 @@ DB 层约定（`src/DB.js`）：
 
 ### 探测方式
 
-| 服务             | 探测逻辑                                                                     |
-| ---------------- | ---------------------------------------------------------------------------- |
-| `ipv6_proxy`     | 通过各 VPS 的 IPv6 代理请求 Google 翻译 API，断言 `"I"` → `"我"`             |
-| `redis_sentinel` | 连接哨兵节点，检查：哨兵存活、主库状态、主从关系一致、从库数 ≥ 2、集群完整   |
-| `smtp`           | Cloudflare DoH 查 A/AAAA 记录校验 DNS 解析 → 对每个 VPS 做 TLS SMTP 登录测试 |
+| 服务             | 探测逻辑                                                                                                                                                                                     |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ipv6_proxy`     | 通过各 VPS 的 IPv6 代理请求 Google 翻译 API，断言 `"I"` → `"我"`                                                                                                                             |
+| `redis_sentinel` | 连接哨兵节点，检查：哨兵存活、主库状态、主从关系一致、从库数 ≥ 2、集群完整                                                                                                                   |
+| `smtp`           | Cloudflare DoH 查 A/AAAA 记录校验 DNS 解析 → 对每个 VPS 做 TLS SMTP 登录测试                                                                                                                 |
+| `http`           | 外部域名可用性：fetch `https://域名`，非 2xx 或耗时超阈值（`max_ms`，默认 10s）告警；HTML 错误页 body 不进告警文本（CF 错误页含随机 Ray ID，会绕过文本去重），耗时告警文本只含阈值不含实测值 |
+| `ssl`            | SSL 证书：解析 A 记录后按 IP 连 443 拿证书（Bun `node:tls` 按域名连 CNAME 链会用 CNAME 目标当 SNI，拿到错误证书），握手后显式校验域名匹配，剩余天数 < 阈值（`day`，默认 14 天）告警          |
+
+`http` / `ssl` 是 **uptime 风格**监控：探测对象是外部域名（URL），与机器无关，**域名本身即落点**（经 `vpsEnsure` 以占位 IP `0.0.0.0` 自动注册为逻辑节点，**ip.json 只放真实机器**），状态页胶囊、告警标题直接显示域名（如 `http/backend:api.talkto.me`）。两种写法：裸键单域名（`http/api.example.com:`，可用率独立一行）或分组（`http/backend: {host: [...]}`——host 内每个域名独立探测/独立告警/独立胶囊，但 90 天可用率按顶层键合并为一行，与 `ipv6_proxy` 多主机同语义）。域名探测只有链路级信息，定位不到具体后端机器——要机器级定位需另加直连每台后端的探测类型（参照 `smtp` 逐台验证的形态）。
 
 ---
 

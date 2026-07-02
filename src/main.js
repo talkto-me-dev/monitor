@@ -23,7 +23,7 @@ await Promise.all(
       [srv, tag] = srv_tag.split("/"),
       task = TASK.default(srv, () => []),
       push = (args) => task.push([srv_id, ...args]);
-    SRV[srv](tag, push, args);
+    await SRV[srv](tag, push, args);
   }),
 );
 
