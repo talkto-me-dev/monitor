@@ -2,8 +2,10 @@ import log from "@3-/console/log.js";
 import send from "../send.js";
 import DB from "../DB.js";
 import ERR from "./ERR.js";
+import OK_SINCE from "./OK_SINCE.js";
 
 export default async (now, name, srv_id, vps_id, [_, begin, errIng_id, txt_id]) => {
+  OK_SINCE.set(srv_id + ":" + vps_id, now);
   const cost = now - begin,
     msg = "✅ " + name;
 

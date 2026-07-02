@@ -52,8 +52,9 @@ monitor/
 │   ├── Watch.js       # 每轮执行：并发 ping 所有任务 → statusWatch
 │   ├── ping.js        # 单次探测：线程池执行 → 成功/失败处理
 │   ├── statusWatch.js # 监控自身：检查 cloudflare monitor-watch 是否存活
-│   ├── stateBuild.js  # 纯函数：TASK + ERR + VPS_ID_IP → 状态快照对象（无 import，可单测）
-│   ├── stateSnapshot.js # 状态快照写 Redis `status:state`（薄写入层）
+│   ├── stateBuild.js  # 纯函数：TASK + ERR + VPS_ID_IP + OK_SINCE → 状态快照对象（无 import，可单测）
+│   ├── uptimeBuild.js # 纯函数：errFixed/errIng + srv.ctime → 近 90 天每日可用率（东八区日界）
+│   ├── stateSnapshot.js # 快照（含 up 可用率）写 Redis `status:state`
 │   ├── send.js        # 告警发送
 │   ├── DB.js          # PostgreSQL 连接（Bun.sql），导出 q / isDup
 │   ├── R.js           # Redis 连接
@@ -63,7 +64,8 @@ monitor/
 │   ├── db/            # 数据库操作
 │   │   ├── ERR.js         # 内存异常状态（启动时从 errIng 表加载）
 │   │   ├── errIngNew.js   # 新异常：upsert errIng + 推送告警
-│   │   ├── recover.js     # 恢复：删 errIng → 写 errFixed → 推送恢复通知
+│   │   ├── recover.js     # 恢复：删 errIng → 写 errFixed → 推送恢复通知 + 更新 OK_SINCE
+│   │   ├── OK_SINCE.js    # "srv_id:vps_id" → 上次异常结束时刻（启动查 errFixed，供状态页"持续正常"）
 │   │   ├── VPS_ID_IP.js   # hostname → [id, ip]（启动时同步到 DB）
 │   │   ├── VPS_IP.js / VPS_IP_NAME.js
 │   │   ├── srvId.js       # 服务名 → id
@@ -90,7 +92,7 @@ monitor/
 | 表         | 用途           | 关键字段                                   |
 | ---------- | -------------- | ------------------------------------------ |
 | `vps`      | VPS 节点       | hostname（唯一）、ip（bytea）              |
-| `srv`      | 服务名         | val（唯一，如 `redis_sentinel/cluster-a`） |
+| `srv`      | 服务名         | val（唯一，如 `redis_sentinel/cluster-a`）、ctime（首次注册秒，观测窗口起点） |
 | `txt`      | 错误文本去重   | hash（blake2b256，bytea 唯一）、val        |
 | `errIng`   | 正在发生的异常 | vps_id + srv_id（联合唯一）、txt_id、ts    |
 | `errFixed` | 已恢复的异常   | id 沿用 errIng（非自增）+ begin、duration  |
