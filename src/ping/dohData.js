@@ -1,0 +1,9 @@
+// 替代 @3-/doh/AnswerData：NOERROR 但零记录时响应无 Answer 字段，返回空数组而非抛 TypeError
+
+export default async (doh, domain, type) => {
+  const r = await doh(domain, type);
+  if (r.Status) {
+    throw new Error(JSON.stringify(r, null, 2));
+  }
+  return r.Answer?.map(({ data }) => data) ?? [];
+};

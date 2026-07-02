@@ -1,0 +1,6 @@
+{
+  "rules": {
+    "no-ex-assign": "off",
+    "no-sparse-arrays": "off"
+  }
+}
