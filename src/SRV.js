@@ -14,6 +14,12 @@ const domainSrv = (extra) => async (tag, push, args) => {
 };
 
 export default {
+  // 云端数据库（TiDB Cloud 等）与机器无关，tag（无 tag 则网关域名）即落点
+  mysql: async (tag, push, args) => {
+    const name = tag ?? args.host;
+    await vpsEnsure(name);
+    push([, name, args]);
+  },
   ipv6_proxy: (_tag, push, args) => {
     const { auth, port } = args;
     args.vps.map((vps) => {
