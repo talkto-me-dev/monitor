@@ -22,11 +22,13 @@ export default {
       push([tag, name, conf]);
     }
   },
-  // 每台 nginx 独立探测：拉统计端点 JSON，与上一轮快照（框架回传）做 delta 判 5xx 阈值
-  nginx: (_tag, push, args) => {
+  // 服务×机器双维：顶层键 nginx/<server_name> 为一个服务（可用率按服务一行），
+  // 每台机器独立探测/独立告警；拉统计端点后只取该服务的计数，
+  // 与上一轮快照（框架回传）做 delta 判 5xx 阈值
+  nginx: (tag, push, args) => {
     const { vps, ...conf } = args;
     vps.map((name) => {
-      push([, name, VPS_ID_IP.get(name)[1], conf]);
+      push([tag, name, tag, VPS_ID_IP.get(name)[1], conf]);
     });
   },
   ipv6_proxy: (_tag, push, args) => {

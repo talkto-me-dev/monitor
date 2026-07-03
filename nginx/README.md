@@ -49,17 +49,20 @@
 
 ## 监控端配置（conf/watch.yml）
 
+服务×机器双维：顶层键 `nginx/<server_name>` = 一个服务（90 天可用率一行），`vps` 里每台机器独立探测、独立告警/恢复（告警标题 `nginx/<服务>:<机器>`）。新增 server_name 要补一个顶层键（lua 侧无需任何改动）：
+
 ```yaml
-nginx:
+nginx/api.example.com: &nginx_stat
   port: 9145 # 统计端点端口，默认 80
   path: /monitor-stat # 默认 /monitor-stat
   token: ${NGINX_STAT_TOKEN} # 端点不设 token 时可省
-  max_5xx: 3 # 每分钟 5xx 增量 ≥ 此值告警（各服务独立判断），默认 3，必须 ≥ 1（配 0 会每轮告警）
+  max_5xx: 3 # 每分钟 5xx 增量 ≥ 此值告警，默认 3，必须 ≥ 1（配 0 会每轮告警）
   vps:
     - c-us-01
+nginx/api2.example.com: *nginx_stat # 同配置服务用 YAML 锚点复用
 ```
 
-`.env` / `.env.example` 补 `NGINX_STAT_TOKEN`。每台 vps 独立探测、独立告警；一台 nginx 上多个服务（server_name）的超标信息合并在同一条告警文本里，按服务名分行。
+`.env` / `.env.example` 补 `NGINX_STAT_TOKEN`。
 
 ## 告警语义
 
