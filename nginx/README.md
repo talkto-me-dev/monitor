@@ -1,5 +1,7 @@
 # nginx / openresty 5xx 监控
 
+> 本目录是通用模板/原理说明。**实际部署**在 nix 仓库：`nix/vps/openresty/lua/`（本目录两个 lua 的拷贝）+ `stat.conf`（shared dict、http 级 log_by_lua、9145 统计 server 与 token），`nix/soft/openresty.nix` 负责 /etc 映射与防火墙 9145。改 lua 时两处同步。
+
 原理：log 阶段按 `服务名 × 状态码` 在 `lua_shared_dict` 里做**单调递增**计数（跨 worker 原子、reload 保留、restart 清零），`/monitor-stat` 端点输出 JSON；监控端每轮（60s）拉取后与上一轮快照做 delta 判阈值。没有分钟分桶，也就没有"分钟边界与拉取周期不对齐导致漏检/重复告警"的竞态。
 
 ## nginx 侧接入（OpenResty，或带 lua-nginx-module + cjson 的 nginx）
