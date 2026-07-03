@@ -145,6 +145,7 @@ watch()
     → 失败 + 与上次相同错误文本 → 跳过（不重复告警）
     → 失败 + 新错误 → errIngNew（upsert errIng → 推送 ❌）
   → stateSnapshot()：全量状态快照写 Redis status:state（供 monitor-watch 状态页读取）
+    可用率行名 = srv 表键名（顶层键），不用 push 的 tag 拼（tag 留空的类型会同名互吞）
   → statusWatch():
     → 读 Redis key `status-watch:ts`，检查 cloudflare status-watch 最后心跳
     → 写 `status:ts` 作为自身心跳

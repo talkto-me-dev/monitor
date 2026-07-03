@@ -12,25 +12,35 @@ const DAYS = 90;
 export default async (task, now) => {
   const state = stateBuild(task, ERR, VPS_ID_IP, OK_SINCE, now);
 
-  // srv_id → 展示名（同 srv_id 多任务如 ipv6_proxy 多主机，uptimeBuild 内去重为一行）
-  const names = new Map();
-  for (const [srv, li] of task) {
-    for (const [srv_id, tag] of li) {
-      names.set(srv_id, srv + (tag ? "/" + tag : ""));
+  // 可用率行名 = srv 表键名（顶层键，如 mysql/tidb-prod-intl），只收本次在监控的 srv_id。
+  // 不能用 push 时的 tag 拼名：tag 留空的类型（mysql、裸键域名）会同名互吞，
+  // uptimeBuild 按名称去重后只剩第一行，其余实例的故障数据被丢弃
+  const active = new Set();
+  for (const [, li] of task) {
+    for (const [srv_id] of li) {
+      active.add(srv_id);
     }
   }
   const ongoing = [];
   ERR.forEach((m, srv_id) => m.forEach(([, ts]) => ongoing.push([srv_id, ts])));
 
   const win_start = now - DAYS * 86400;
-  const [fixed, ctime] = await Promise.all([
+  const [fixed, srv_rows] = await Promise.all([
     DB.q("SELECT srv_id,begin,duration FROM errFixed WHERE begin+duration > $1", win_start),
-    DB.q("SELECT id,ctime FROM srv"),
+    DB.q("SELECT id,val,ctime FROM srv"),
   ]);
+  const names = new Map(),
+    ctime = new Map();
+  srv_rows.forEach(([id, val, ts]) => {
+    if (active.has(id)) {
+      names.set(id, val);
+    }
+    ctime.set(id, ts);
+  });
   state.up = uptimeBuild({
     fixed,
     ongoing,
-    ctime: new Map(ctime),
+    ctime,
     names,
     now,
     days: DAYS,
