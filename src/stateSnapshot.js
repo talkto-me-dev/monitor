@@ -12,8 +12,8 @@ const DAYS = 90;
 export default async (task, now) => {
   const state = stateBuild(task, ERR, VPS_ID_IP, OK_SINCE, now);
 
-  // 可用率行名 = srv 表键名（顶层键，如 mysql/tidb-prod-intl），只收本次在监控的 srv_id。
-  // 不能用 push 时的 tag 拼名：tag 留空的类型（mysql、裸键域名）会同名互吞，
+  // 可用率行名 = srv 表键名（顶层键，如 mysql/tidb），只收本次在监控的 srv_id。
+  // 不能用 push 时的 tag 拼名：tag 留空的类型（裸键域名）会同名互吞，
   // uptimeBuild 按名称去重后只剩第一行，其余实例的故障数据被丢弃
   const active = new Set();
   for (const [, li] of task) {

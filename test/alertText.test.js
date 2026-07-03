@@ -33,11 +33,13 @@ test("recoverText：无剩余异常 → 🎉", () => {
 test("recoverText：剩余异常逐条列出，落点与服务名重复时不重复展示", () => {
   const txt = recoverText(TS, TS - 600, "", [
     ["redis_sentinel/contabo.us", "c-us-02", TS - 86400 * 3],
-    ["mysql/tidb-alpha-intl", "tidb-alpha-intl", TS - 120],
+    ["mysql/tidb", "alpha-ai", TS - 300],
+    ["http/api.example.com", "api.example.com", TS - 120],
   ]);
-  expect(txt).toContain("**其余 2 个异常仍在持续**");
+  expect(txt).toContain("**其余 3 个异常仍在持续**");
   expect(txt).toContain("- redis_sentinel/contabo.us · c-us-02（已持续 3 天）");
-  expect(txt).toContain("- mysql/tidb-alpha-intl（已持续 2 分钟）"); // 无 " · tidb-alpha-intl"
+  expect(txt).toContain("- mysql/tidb · alpha-ai（已持续 5 分钟）");
+  expect(txt).toContain("- http/api.example.com（已持续 2 分钟）"); // 无 " · api.example.com"
   expect(txt).not.toContain("🎉");
 });
 

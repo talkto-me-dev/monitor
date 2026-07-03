@@ -14,11 +14,13 @@ const domainSrv = (extra) => async (tag, push, args) => {
 };
 
 export default {
-  // 云端数据库（TiDB Cloud 等）与机器无关，tag（无 tag 则网关域名）即落点
+  // 云端数据库（TiDB Cloud 等）与机器无关：顶层键 = 一套集群（可用率合并为一行），
+  // instances 下每个实例独立探测/独立告警，实例键即落点（vpsEnsure 逻辑节点）
   mysql: async (tag, push, args) => {
-    const name = tag ?? args.host;
-    await vpsEnsure(name);
-    push([, name, args]);
+    for (const [name, conf] of Object.entries(args.instances)) {
+      await vpsEnsure(name);
+      push([tag, name, conf]);
+    }
   },
   // 每台 nginx 独立探测：拉统计端点 JSON，与上一轮快照（框架回传）做 delta 判 5xx 阈值
   nginx: (_tag, push, args) => {
