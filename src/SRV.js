@@ -20,6 +20,13 @@ export default {
     await vpsEnsure(name);
     push([, name, args]);
   },
+  // 每台 nginx 独立探测：拉统计端点 JSON，与上一轮快照（框架回传）做 delta 判 5xx 阈值
+  nginx: (_tag, push, args) => {
+    const { vps, ...conf } = args;
+    vps.map((name) => {
+      push([, name, VPS_ID_IP.get(name)[1], conf]);
+    });
+  },
   ipv6_proxy: (_tag, push, args) => {
     const { auth, port } = args;
     args.vps.map((vps) => {
