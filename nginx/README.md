@@ -23,7 +23,14 @@
 
    没有 server_name 的 server（如默认 server）必须 `set $monitor_srv`，否则统计会被静默丢弃。
 
-   ⚠️ `log_by_lua` 同一 phase 只生效最里层一个：若 server/location 已有其它 log_by_lua，需手动合并进去，否则统计会静默丢失。
+   ⚠️ nginx 规则：log 阶段每个请求只执行一个 lua 脚本，server/location 级的 `log_by_lua_*` 会**替换**（而非叠加）http 级的这条，命中它的请求就静默脱离统计。若某处确实需要自己的 log 脚本，在它末尾把统计捎带执行即可：
+
+   ```nginx
+   log_by_lua_block {
+     -- 你自己的逻辑 ...
+     dofile("/etc/openresty/lua/stat.lua") -- 合并 5xx 统计
+   }
+   ```
 
 4. 暴露统计端点。推荐独立 server 监听专用端口（也可挂在现有 server 的 location 上）：
 
