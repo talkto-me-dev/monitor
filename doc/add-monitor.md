@@ -10,7 +10,7 @@ conf/watch.yml
   → SRV.js：把 yml 字段组装成任务，push 一次 = 一条探测任务
   → Watch.js 每 60s：每条任务 → ping()
   → ping.js：Piscina worker 线程执行，30s 超时
-  → var/worker.js：import("../ping/" + srv + ".js").default(...args)
+  → var/worker.js：import("../ping/" + srv + ".js").default(...args, 上一轮 state)
 ```
 
 ## 第 1 步：conf/watch.yml 声明监控项
@@ -52,10 +52,10 @@ push([tag, vps, ...ping_args])
 
 | 形态                               | 行为                                                    | 现有例子                                |
 | ---------------------------------- | ------------------------------------------------------- | --------------------------------------- |
-| 单个主机名字符串（每台 push 一次） | 每台独立探测、独立告警/恢复                             | `ipv6_proxy`                            |
+| 单个主机名字符串（每台 push 一次） | 每台独立探测、独立告警/恢复                             | `ipv6_proxy`、`nginx`                   |
 | 主机名数组（整组 push 一次）       | 整组一次探测，异常挂在 `vps[0]` 名下，展示名用 `&` 连接 | `redis_sentinel`、`smtp`、`http`、`ssl` |
 
-`vps` 的语义是**归属/落点**（异常记录挂谁名下），不要求真的是探测目标。uptime 风格的外部域名探测（`http`/`ssl`）与机器无关，**域名本身即落点**，经 `vpsEnsure`（`src/db/VPS_ID_IP.js`）以占位 IP 自动注册为逻辑节点（**ip.json 只放真实机器**）。两种 yml 写法（见 `SRV.js` 的 `domainSrv`）：裸键单域名 `http/api.example.com:`（可用率独立一行），或分组 `http/backend: {host: [...]}`（每域名独立探测/告警，可用率按顶层键合并一行）。
+`vps` 的语义是**归属/落点**（异常记录挂谁名下），不要求真的是探测目标。uptime 风格的外部域名探测（`http`/`ssl`）与云端服务探测（`mysql` 连 TiDB Cloud）与机器无关，**域名/tag 本身即落点**，经 `vpsEnsure`（`src/db/VPS_ID_IP.js`）以占位 IP 自动注册为逻辑节点（**ip.json 只放真实机器**）。两种 yml 写法（见 `SRV.js` 的 `domainSrv`）：裸键单域名 `http/api.example.com:`（可用率独立一行），或分组 `http/backend: {host: [...]}`（每域名独立探测/告警，可用率按顶层键合并一行）。
 
 **错误文本必须稳定**：去重靠文本比较（`errIngNew.js`），文本里不要带每次变化的值（实测耗时、随机 ID、时间戳），否则同一异常每轮都会重新告警。
 
@@ -93,10 +93,20 @@ redis_sentinel: (tag, push, args) => {
 
 文件名必须等于 srv 类型名（worker 按 `../ping/<srv>.js` 动态 import）。`export default` 一个 async 函数：
 
-- **成功**：正常返回（返回值不使用）
+- **成功**：正常返回 `undefined`（无状态探测不要返回任何值）
 - **失败**：`throw` 或 `raise(...)`（`@3-/raise`），错误文本就是告警内容——写清楚、可读，相同文本会自动去重（连续同样的错误只告警一次）
 - 超时不用自己管：`ping.js` 有统一的 30 秒 AbortController，超时记为 `timeout`
 - 需要读 `.env` 的配置（如 API key）可以直接 `import { XXX } from "../env.js"`（worker 线程与主进程共享环境变量），新键记得在 `src/loadEnv.js` 里加校验
+
+### 有状态探测（delta 型）
+
+worker 线程会被回收，模块级状态靠不住；框架提供跨轮状态通道（`ping.js` 的 `STATE`）：
+
+- 每轮调用时，**上一轮的 state 作为末位参数回传**（首轮为 `undefined`；无状态探测忽略这个参数即可）
+- 有状态探测**不 throw**（业务判断层面），而是返回 `[err_li, state]`：框架先存 state 再 `raise(err_li)`（空数组 = 正常）。这保证**告警轮基线也前移**——若靠 throw 传错误，state 不更新，delta 会相对旧基线越滚越大、永不恢复
+- 探测环节本身的失败（如拉不到统计端点）照常 throw，state 保持上一轮值，下一轮 delta 覆盖更长区间——判断阈值时记得按实际间隔折算（在 state 里存拉取时刻）
+- 超时（AbortError）与 throw 轮 state 都不更新
+- 现成例子：`src/ping/nginx.js`（`nginxCheck` 纯函数可单测）
 
 示例（配合上面 yml 与 SRV 的 health 例子）：
 

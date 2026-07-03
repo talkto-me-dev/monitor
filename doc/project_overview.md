@@ -28,7 +28,7 @@
   - `REDIS_*`：Redis 连接
   - `LARK` / `PUSHPLUS` + `PUSHPLUS_TOPIC`：告警通道（至少一个）
   - `GOOGLE_TRAN`：Google 翻译 API Key（ipv6_proxy 探测用）
-  - `SENTINEL_PASSWORD` / `IPV6_PROXY_AUTH` / `SMTP_PASSWORD`：watch.yml 占位符引用；`DEPLOY_VPS`：部署目标；`STATUS_PAGE`：状态页完整 URL（告警卡片页脚，可留空）
+  - `SENTINEL_PASSWORD` / `IPV6_PROXY_AUTH` / `SMTP_PASSWORD` / `MYSQL_PASSWORD_<实例>`（mysql 多实例一库一键，名字自由）/ `NGINX_STAT_TOKEN`：watch.yml 占位符引用；`DEPLOY_VPS`：部署目标；`STATUS_PAGE`：状态页完整 URL（告警卡片页脚，可留空）
 - **加载机制**：bun 启动时自动加载工作目录下的 `.env`（dev 与 systemd 均依赖此机制，`monitor.service` 的 `WorkingDirectory=/opt/monitor`）；`src/env.js` 统一装配并校验（缺关键项启动即报错），装配逻辑在 `src/loadEnv.js`（纯函数，可测）。
 - **`conf/`（不入仓——仓库公开，含真实 IP 与监控拓扑；deploy.sh 部署时随 `.env` 一起 scp）**：`watch.yml`（监控拓扑，密码写成 `${SENTINEL_PASSWORD}` 等占位符，由 `src/loadYml.js` 的 `envRef` 在解析后递归替换）+ `ip.json`（VPS 主机名 → IP）。
 - 本地开发数据库：docker 容器 `status-pg`（postgres:16，端口 127.0.0.1:5432，volume `status-pg-data`）。
@@ -48,9 +48,9 @@ monitor/
 │   ├── main.js        # 入口：加载配置 → 注册任务 → 60s 轮询
 │   ├── env.js         # 环境变量统一装配（fail-fast）
 │   ├── loadEnv.js     # env → 配置对象（纯函数）
-│   ├── SRV.js         # 服务注册表：ipv6_proxy / redis_sentinel / smtp / http / ssl
+│   ├── SRV.js         # 服务注册表：mysql / nginx / ipv6_proxy / redis_sentinel / smtp / http / ssl
 │   ├── Watch.js       # 每轮执行：并发 ping 所有任务 → statusWatch
-│   ├── ping.js        # 单次探测：线程池执行 → 成功/失败处理
+│   ├── ping.js        # 单次探测：线程池执行 → 成功/失败处理 + 跨轮状态通道（delta 型探测用）
 │   ├── statusWatch.js # 监控自身：检查 cloudflare monitor-watch 是否存活
 │   ├── stateBuild.js  # 纯函数：TASK + ERR + VPS_ID_IP + OK_SINCE → 状态快照对象（无 import，可单测）
 │   ├── uptimeBuild.js # 纯函数：errFixed/errIng + srv.ctime → 近 90 天每日可用率（东八区日界）
@@ -73,6 +73,7 @@ monitor/
 │   │   ├── txtId.js       # 错误文本 → id（blake2b256 去重，Bun 内置 hash，原 @3-/txt_id 内联）
 │   │   └── valId.js       # 通用 val→id（原 @3-/val_id 内联）
 │   └── var/           # 线程池与 worker 入口
+├── nginx/             # nginx/openresty 侧 5xx 统计脚本（stat.lua / report.lua）+ 接入 README
 ├── backup/
 │   ├── schema.sql     # PostgreSQL 建表（新库初始化用）
 │   └── dump.sh        # pg_dump 导出表结构
@@ -111,13 +112,15 @@ DB 层约定（`src/DB.js`）：
 
 ### 探测方式
 
-| 服务             | 探测逻辑                                                                                                                                                                                     |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ipv6_proxy`     | 通过各 VPS 的 IPv6 代理请求 Google 翻译 API，断言 `"I"` → `"我"`                                                                                                                             |
-| `redis_sentinel` | 连接哨兵节点，检查：哨兵存活、主库状态、主从关系一致、从库数 ≥ 2、集群完整                                                                                                                   |
-| `smtp`           | Cloudflare DoH 查 A/AAAA 记录校验 DNS 解析 → 对每个 VPS 做 TLS SMTP 登录测试                                                                                                                 |
-| `http`           | 外部域名可用性：fetch `https://域名`，非 2xx 或耗时超阈值（`max_ms`，默认 10s）告警；HTML 错误页 body 不进告警文本（CF 错误页含随机 Ray ID，会绕过文本去重），耗时告警文本只含阈值不含实测值 |
-| `ssl`            | SSL 证书：解析 A 记录后按 IP 连 443 拿证书（Bun `node:tls` 按域名连 CNAME 链会用 CNAME 目标当 SNI，拿到错误证书），握手后显式校验域名匹配，剩余天数 < 阈值（`day`，默认 14 天）告警          |
+| 服务             | 探测逻辑                                                                                                                                                                                                                                                                               |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ipv6_proxy`     | 通过各 VPS 的 IPv6 代理请求 Google 翻译 API，断言 `"I"` → `"我"`                                                                                                                                                                                                                       |
+| `redis_sentinel` | 连接哨兵节点，检查：哨兵存活、主库状态、主从关系一致、从库数 ≥ 2、集群完整                                                                                                                                                                                                             |
+| `smtp`           | Cloudflare DoH 查 A/AAAA 记录校验 DNS 解析 → 对每个 VPS 做 TLS SMTP 登录测试                                                                                                                                                                                                           |
+| `http`           | 外部域名可用性：fetch `https://域名 + path`（可选 `path`/`token`，token 经 `x-token` 头，供 k8s 微服务 `/healthz` 等健康端点），非 2xx 或耗时超阈值（`max_ms`，默认 10s）告警；HTML 错误页 body 不进告警文本（CF 错误页含随机 Ray ID，会绕过文本去重），耗时告警文本只含阈值不含实测值 |
+| `ssl`            | SSL 证书：解析 A 记录后按 IP 连 443 拿证书（Bun `node:tls` 按域名连 CNAME 链会用 CNAME 目标当 SNI，拿到错误证书），握手后显式校验域名匹配，剩余天数 < 阈值（`day`，默认 14 天）告警                                                                                                    |
+| `mysql`          | mysql/tidb 可用性：`Bun.sql` MySQL adapter（Bun ≥ 1.2.22）连接 + `SELECT 1` 全链路验证；TiDB Cloud 强制 TLS，必须配网关域名不能 IP 直连（SNI 随 hostname 自动携带）；错误文本经 `mysqlErr` 规整（防 Bun 版本升级改措辞破坏去重）；与机器无关，tag 即落点（vpsEnsure 逻辑节点）         |
+| `nginx`          | nginx/openresty 5xx 统计：拉各 VPS 统计端点 JSON（nginx 侧 lua 累计计数，见 `nginx/README.md`），与上一轮快照（框架回传）做 delta，任一服务每分钟 5xx 增量 ≥ `max_5xx`（默认 3）告警；首轮/nginx 重启（start 变化）/计数回退只存快照；每台 VPS 独立探测独立告警                        |
 
 `http` / `ssl` 是 **uptime 风格**监控：探测对象是外部域名（URL），与机器无关，**域名本身即落点**（经 `vpsEnsure` 以占位 IP `0.0.0.0` 自动注册为逻辑节点，**ip.json 只放真实机器**），状态页胶囊、告警标题直接显示域名（如 `http/backend:api.talkto.me`）。两种写法：裸键单域名（`http/api.example.com:`，可用率独立一行）或分组（`http/backend: {host: [...]}`——host 内每个域名独立探测/独立告警/独立胶囊，但 90 天可用率按顶层键合并为一行，与 `ipv6_proxy` 多主机同语义）。域名探测只有链路级信息，定位不到具体后端机器——要机器级定位需另加直连每台后端的探测类型（参照 `smtp` 逐台验证的形态）。
 
@@ -135,7 +138,8 @@ main.js 启动
 watch()
   → 遍历 TASK，并发执行 ping()
   → ping():
-    → Piscina worker 线程执行 ping/{srv}.js（30s 超时 AbortController）
+    → Piscina worker 线程执行 ping/{srv}.js（30s 超时 AbortController；上一轮 state 作为末位参数回传）
+    → 有状态探测（delta 型，如 nginx）返回 [err_li, state]：state 先存再 raise（告警轮基线也前移）
     → 成功 + 之前有异常 → recover（删 errIng → 写 errFixed → 推送 ✅ + 剩余异常数）
     → 成功 + 无异常 → log ✅
     → 失败 + 与上次相同错误文本 → 跳过（不重复告警）
