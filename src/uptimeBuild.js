@@ -1,6 +1,7 @@
 // 纯函数（禁止 import，便于单测）：近 N 天每日可用率
 // 入参时间全部为秒；日界按东八区（UTC+8）切分
-// 返回 [[名称, 可用率字符串, N 位日状态串], ...]，日状态 0=无数据 1=正常 2=当日故障<1h 3=当日故障≥1h
+// 返回 [[名称, 可用率字符串, N 长度日故障秒数数组], ...]，元素 null=无数据 0=正常 >0=当日故障秒数
+// （状态页据此按占比渐变上色；旧格式为 0-3 日状态串，monitor-watch 兼容两种）
 // 名称重复的 srv_id（如 ipv6_proxy 多主机共用一行 srv）自动去重
 
 const DAY = 86400,
@@ -40,21 +41,21 @@ export default ({ fixed, ongoing, ctime, names, now, days = 90 }) => {
     seen.add(name);
     const since = +(ctime.get(srv_id) ?? now),
       li = down.get(srv_id),
-      day_state = [];
+      day_secs = [];
     let total_down = 0;
     for (let i = 0; i < days; ++i) {
       const day_end = win_start + (i + 1) * DAY;
       if (day_end <= since) {
-        day_state.push(0);
+        day_secs.push(null);
         continue;
       }
       const d = li ? li[i] : 0;
       total_down += d;
-      day_state.push(d == 0 ? 1 : d < 3600 ? 2 : 3);
+      day_secs.push(Math.round(d));
     }
     const observed = now - Math.max(since, win_start),
       pct = observed < 60 ? 100 : (100 * (1 - total_down / observed)).toFixed(2);
-    rows.push([name, +pct + "", day_state.join("")]);
+    rows.push([name, +pct + "", day_secs]);
   }
   return rows.sort((a, b) => a[0].localeCompare(b[0]));
 };
