@@ -13,7 +13,7 @@ const TASK = new Map(),
     try {
       await Watch(TASK);
     } catch (e) {
-      await send("❌ 监控异常", e);
+      await send("❌ 监控自身异常", "本轮探测未完成，异常：" + e);
     }
   };
 

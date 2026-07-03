@@ -140,7 +140,7 @@ watch()
   → ping():
     → Piscina worker 线程执行 ping/{srv}.js（30s 超时 AbortController；上一轮 state 作为末位参数回传）
     → 有状态探测（delta 型，如 nginx）返回 [err_li, state]：state 先存再 raise（告警轮基线也前移）
-    → 成功 + 之前有异常 → recover（删 errIng → 写 errFixed → 推送 ✅ + 剩余异常数）
+    → 成功 + 之前有异常 → recover（删 errIng → 写 errFixed → 推送 ✅：故障时段/错误内容/其余异常明细，文案在 src/alertText.js 纯函数）
     → 成功 + 无异常 → log ✅
     → 失败 + 与上次相同错误文本 → 跳过（不重复告警）
     → 失败 + 新错误 → errIngNew（upsert errIng → 推送 ❌）
