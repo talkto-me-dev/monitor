@@ -37,6 +37,9 @@ export default {
     args.vps = vps.map((name) => [name, VPS_IP[name]]);
     push([tag, vps, args]);
   },
-  http: domainSrv((args) => args?.max_ms ?? 1e4),
+  http: domainSrv((args) => {
+    const { max_ms, path, token } = args ?? {};
+    return { max_ms, path, token };
+  }),
   ssl: domainSrv((args) => args?.day ?? 14),
 };

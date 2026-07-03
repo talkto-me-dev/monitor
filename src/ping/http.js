@@ -19,9 +19,13 @@ export const httpCheck = (status, body, ms, max_ms) => {
   return err_li;
 };
 
-export default async (host, max_ms) => {
+// path/token 供健康端点探测（如 k8s 微服务的 /healthz）：token 经 x-token 头携带
+export default async (host, opts) => {
+  const { max_ms = 1e4, path = "", token } = opts ?? {};
   const begin = Date.now(),
-    r = await fetch("https://" + host),
+    r = await fetch("https://" + host + path, {
+      headers: token ? { "x-token": token } : undefined,
+    }),
     ms = Date.now() - begin;
   raise(httpCheck(r.status, r.ok ? "" : await r.text(), ms, max_ms));
 };
