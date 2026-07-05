@@ -52,7 +52,7 @@ push([tag, vps, ...ping_args])
 
 | 形态                               | 行为                                                    | 现有例子                                |
 | ---------------------------------- | ------------------------------------------------------- | --------------------------------------- |
-| 单个主机名字符串（每台 push 一次） | 每台独立探测、独立告警/恢复                             | `ipv6_proxy`、`nginx`                   |
+| 单个主机名字符串（每台 push 一次） | 每台独立探测、独立告警/恢复                             | `nginx`、`mysql`                        |
 | 主机名数组（整组 push 一次）       | 整组一次探测，异常挂在 `vps[0]` 名下，展示名用 `&` 连接 | `redis_sentinel`、`smtp`、`http`、`ssl` |
 
 `vps` 的语义是**归属/落点**（异常记录挂谁名下），不要求真的是探测目标。uptime 风格的外部域名探测（`http`/`ssl`）与云端服务探测（`mysql` 连 TiDB Cloud）与机器无关，**域名/tag 本身即落点**，经 `vpsEnsure`（`src/db/VPS_ID_IP.js`）以占位 IP 自动注册为逻辑节点（**ip.json 只放真实机器**）。两种 yml 写法（见 `SRV.js` 的 `domainSrv`）：裸键单域名 `http/api.example.com:`（可用率独立一行），或分组 `http/backend: {host: [...]}`（每域名独立探测/告警，可用率按顶层键合并一行）。
@@ -62,11 +62,11 @@ push([tag, vps, ...ping_args])
 两种典型写法（都是真实代码）：
 
 ```js
-// 每台单独探测：ipv6_proxy → ping 收到 (ip, auth, port)
-ipv6_proxy: (_tag, push, args) => {
-  const { auth, port } = args;
-  args.vps.map((vps) => {
-    push([, vps, VPS_ID_IP.get(vps)[1], auth, port]);
+// 每台单独探测：nginx → ping 收到 (tag, ip, conf)
+nginx: (tag, push, args) => {
+  const { vps, ...conf } = args;
+  vps.map((name) => {
+    push([tag, name, tag, VPS_ID_IP.get(name)[1], conf]);
   });
 },
 

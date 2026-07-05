@@ -27,8 +27,7 @@
   - `DB_*`：PostgreSQL 连接（HOST/PORT/USER/PASSWORD/NAME，可选 `DB_SSL` JSON）
   - `REDIS_*`：Redis 连接
   - `LARK` / `PUSHPLUS` + `PUSHPLUS_TOPIC`：告警通道（至少一个）
-  - `GOOGLE_TRAN`：Google 翻译 API Key（ipv6_proxy 探测用）
-  - `SENTINEL_PASSWORD` / `IPV6_PROXY_AUTH` / `SMTP_PASSWORD` / `MYSQL_PASSWORD_<实例>`（mysql 多实例一库一键，名字自由）/ `NGINX_STAT_TOKEN`：watch.yml 占位符引用；`DEPLOY_VPS`：部署目标；`STATUS_PAGE`：状态页完整 URL（告警卡片页脚，可留空）
+  - `SENTINEL_PASSWORD` / `SMTP_PASSWORD` / `MYSQL_PASSWORD_<实例>`（mysql 多实例一库一键，名字自由）/ `NGINX_STAT_TOKEN`：watch.yml 占位符引用；`DEPLOY_VPS`：部署目标；`STATUS_PAGE`：状态页完整 URL（告警卡片页脚，可留空）
 - **加载机制**：bun 启动时自动加载工作目录下的 `.env`（dev 与 systemd 均依赖此机制，`monitor.service` 的 `WorkingDirectory=/opt/monitor`）；`src/env.js` 统一装配并校验（缺关键项启动即报错），装配逻辑在 `src/loadEnv.js`（纯函数，可测）。
 - **`conf/`（不入仓——仓库公开，含真实 IP 与监控拓扑；deploy.sh 部署时随 `.env` 一起 scp）**：`watch.yml`（监控拓扑，密码写成 `${SENTINEL_PASSWORD}` 等占位符，由 `src/loadYml.js` 的 `envRef` 在解析后递归替换）+ `ip.json`（VPS 主机名 → IP）。
 - 本地开发数据库：docker 容器 `status-pg`（postgres:16，端口 127.0.0.1:5432，volume `status-pg-data`）。
@@ -48,7 +47,7 @@ monitor/
 │   ├── main.js        # 入口：加载配置 → 注册任务 → 60s 轮询
 │   ├── env.js         # 环境变量统一装配（fail-fast）
 │   ├── loadEnv.js     # env → 配置对象（纯函数）
-│   ├── SRV.js         # 服务注册表：mysql / nginx / ipv6_proxy / redis_sentinel / smtp / http / ssl
+│   ├── SRV.js         # 服务注册表：mysql / nginx / redis_sentinel / smtp / http / ssl
 │   ├── Watch.js       # 每轮执行：并发 ping 所有任务 → statusWatch
 │   ├── ping.js        # 单次探测：线程池执行 → 成功/失败处理 + 跨轮状态通道（delta 型探测用）
 │   ├── statusWatch.js # 监控自身：检查 cloudflare monitor-watch 是否存活
@@ -114,7 +113,6 @@ DB 层约定（`src/DB.js`）：
 
 | 服务             | 探测逻辑                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ipv6_proxy`     | 通过各 VPS 的 IPv6 代理请求 Google 翻译 API，断言 `"I"` → `"我"`                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `redis_sentinel` | 连接哨兵节点，检查：哨兵存活、主库状态、主从关系一致、从库数 ≥ 2、集群完整                                                                                                                                                                                                                                                                                                                                                                                       |
 | `smtp`           | Cloudflare DoH 查 A/AAAA 记录校验 DNS 解析 → 对每个 VPS 做 TLS SMTP 登录测试                                                                                                                                                                                                                                                                                                                                                                                     |
 | `http`           | 外部域名可用性：fetch `https://域名 + path`（可选 `path`/`token`，token 经 `x-token` 头，供 k8s 微服务 `/healthz` 等健康端点），非 2xx 或耗时超阈值（`max_ms`，默认 10s）告警；HTML 错误页 body 不进告警文本（CF 错误页含随机 Ray ID，会绕过文本去重），耗时告警文本只含阈值不含实测值                                                                                                                                                                           |
@@ -122,7 +120,7 @@ DB 层约定（`src/DB.js`）：
 | `mysql`          | mysql/tidb 可用性：`Bun.sql` MySQL adapter（Bun ≥ 1.2.22）连接 + `SELECT 1` 全链路验证；TiDB Cloud 强制 TLS，必须配网关域名不能 IP 直连（SNI 随 hostname 自动携带）；错误文本经 `mysqlErr` 规整（防 Bun 版本升级改措辞破坏去重）；与机器无关，顶层键 = 一套集群（可用率合并为一行，另一套集群另起顶层键即分开统计），`instances` 下每个实例独立探测/独立告警，实例键即落点（vpsEnsure 逻辑节点）；2026-07 由"每实例一顶层键"迁来（`backup/migrateMysqlTidb.js`） |
 | `nginx`          | nginx/openresty 5xx 统计，服务×机器双维：顶层键 `nginx/<server_name>` = 一个服务（可用率一行），每台机器独立探测/独立告警（标题如 `nginx/api.x:c-us-01`）；拉统计端点 JSON（nginx 侧 lua 按 server_name 累计计数，见 `nginx/README.md`）后取该服务计数，与上一轮快照（框架回传）做 delta，每分钟 5xx 增量 ≥ `max_5xx`（默认 3）告警；首轮/nginx 重启（start 变化）/计数回退只存快照                                                                              |
 
-`http` / `ssl` 是 **uptime 风格**监控：探测对象是外部域名（URL），与机器无关，**域名本身即落点**（经 `vpsEnsure` 以占位 IP `0.0.0.0` 自动注册为逻辑节点，**ip.json 只放真实机器**），状态页胶囊、告警标题直接显示域名（如 `http/backend:api.talkto.me`）。两种写法：裸键单域名（`http/api.example.com:`，可用率独立一行）或分组（`http/backend: {host: [...]}`——host 内每个域名独立探测/独立告警/独立胶囊，但 90 天可用率按顶层键合并为一行，与 `ipv6_proxy` 多主机同语义）。域名探测只有链路级信息，定位不到具体后端机器——要机器级定位需另加直连每台后端的探测类型（参照 `smtp` 逐台验证的形态）。
+`http` / `ssl` 是 **uptime 风格**监控：探测对象是外部域名（URL），与机器无关，**域名本身即落点**（经 `vpsEnsure` 以占位 IP `0.0.0.0` 自动注册为逻辑节点，**ip.json 只放真实机器**），状态页胶囊、告警标题直接显示域名（如 `http/backend:api.talkto.me`）。两种写法：裸键单域名（`http/api.example.com:`，可用率独立一行）或分组（`http/backend: {host: [...]}`——host 内每个域名独立探测/独立告警/独立胶囊，但 90 天可用率按顶层键合并为一行，与 `nginx` 多机同语义）。域名探测只有链路级信息，定位不到具体后端机器——要机器级定位需另加直连每台后端的探测类型（参照 `smtp` 逐台验证的形态）。
 
 ---
 

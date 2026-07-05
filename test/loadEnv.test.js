@@ -14,7 +14,6 @@ const FULL = {
   LARK: "https://lark/hook",
   PUSHPLUS: "token",
   PUSHPLUS_TOPIC: "topic",
-  GOOGLE_TRAN: "key",
 };
 
 test("完整配置", () => {
@@ -30,7 +29,6 @@ test("完整配置", () => {
   expect(conf.REDIS).toEqual({ host: "r.host", port: 6379, username: "u", password: "p" });
   expect(conf.LARK).toBe("https://lark/hook");
   expect(conf.PUSHPLUS).toEqual(["token", "topic"]);
-  expect(conf.GOOGLE_TRAN).toBe("key");
 });
 
 test("DB_SSL 解析为 JSON", () => {
@@ -39,7 +37,7 @@ test("DB_SSL 解析为 JSON", () => {
 });
 
 test("缺关键项报错", () => {
-  for (const key of ["DB_HOST", "DB_PASSWORD", "REDIS_HOST", "GOOGLE_TRAN"]) {
+  for (const key of ["DB_HOST", "DB_PASSWORD", "REDIS_HOST"]) {
     const env = { ...FULL };
     delete env[key];
     expect(() => loadEnv(env)).toThrow(key);

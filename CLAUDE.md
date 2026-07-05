@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-Monitor（原 status）：每 60 秒探测多台 VPS 上的服务（redis_sentinel / ipv6_proxy / smtp），异常经飞书 + PushPlus 告警，记录持久化到 PostgreSQL。与 sibling 项目 `monitor-watch`（Cloudflare Worker）通过 Redis 心跳键 `status:ts` / `status-watch:ts` 互相监控（键名是历史遗留，改动必须两边同步）。
+Monitor（原 status）：每 60 秒探测多台 VPS 上的服务（redis_sentinel / smtp / nginx 等），异常经飞书 + PushPlus 告警，记录持久化到 PostgreSQL。与 sibling 项目 `monitor-watch`（Cloudflare Worker）通过 Redis 心跳键 `status:ts` / `status-watch:ts` 互相监控（键名是历史遗留，改动必须两边同步）。
 
 架构与流程细节优先读 `doc/project_overview.md`，读不到再翻代码。
 
