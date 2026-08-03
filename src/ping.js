@@ -12,12 +12,10 @@ import recover from "./db/recover.js";
 // 无状态探测无返回值、失败直接 throw，不受影响（末位多收到一个 undefined）。
 const STATE = new Map();
 
+const RETRY_DELAY = 5e3;
+
 export default async (now, srv, tag, srv_id, vps, args) => {
-  const ac = new AbortController(),
-    timer = setTimeout(() => {
-      ac.abort();
-    }, 3e4),
-    errmap = ERR.default(srv_id, () => new Map()),
+  const errmap = ERR.default(srv_id, () => new Map()),
     state = STATE.default(srv_id, () => new Map()),
     vps_is_array = Array.isArray(vps);
 
@@ -25,9 +23,34 @@ export default async (now, srv, tag, srv_id, vps, args) => {
   const srv_name = srv + (tag ? "/" + tag : "") + ":" + (vps_is_array ? vps.join("&") : vps);
 
   const pre_err = errmap.get(vps_id);
+
+  // 网络层/worker 层探测，失败直接 throw
+  const runProbe = async () => {
+    const ac = new AbortController(),
+      timer = setTimeout(() => {
+        ac.abort();
+      }, 3e4);
+    try {
+      const ret = await THREAD_POOL.run([srv, [...args, state.get(vps_id)]], { signal: ac.signal });
+      clearTimeout(timer);
+      return ret;
+    } catch (err) {
+      if (err.name !== "AbortError") clearTimeout(timer);
+      throw err;
+    }
+  };
+
   try {
-    const ret = await THREAD_POOL.run([srv, [...args, state.get(vps_id)]], { signal: ac.signal });
-    clearTimeout(timer);
+    let ret;
+    try {
+      ret = await runProbe();
+    } catch (_firstErr) {
+      // 网络瞬断：等 5s 重试一次，过滤误报
+      log("⟳", srv_name, "retry in 5s");
+      await new Promise((r) => setTimeout(r, RETRY_DELAY));
+      ret = await runProbe();
+    }
+
     // 只认数组形态，防无状态探测不小心隐式返回值被误解构
     if (Array.isArray(ret)) {
       const [err_li, st] = ret;
@@ -44,7 +67,6 @@ export default async (now, srv, tag, srv_id, vps, args) => {
     if (err.name == "AbortError") {
       err = "timeout";
     } else {
-      clearTimeout(timer);
       err = err.toString();
       if (err.startsWith("Error: ")) {
         err = err.slice(7);
