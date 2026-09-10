@@ -26,6 +26,8 @@ export default (env) => {
     PUSHPLUS: env.PUSHPLUS ? [env.PUSHPLUS, env.PUSHPLUS_TOPIC] : undefined,
     STATUS_PAGE: env.STATUS_PAGE,
   };
+  conf.ALERT_COOLDOWN = +(env.ALERT_COOLDOWN || 14400);
+
   if (!conf.LARK && !conf.PUSHPLUS) {
     throw new Error("LARK 和 PUSHPLUS 至少配置一个告警通道");
   }

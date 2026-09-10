@@ -2,4 +2,4 @@
 
 import loadEnv from "./loadEnv.js";
 
-export const { DB, REDIS, LARK, PUSHPLUS, STATUS_PAGE } = loadEnv(process.env);
+export const { DB, REDIS, LARK, PUSHPLUS, STATUS_PAGE, ALERT_COOLDOWN } = loadEnv(process.env);

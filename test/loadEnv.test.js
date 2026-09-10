@@ -60,3 +60,8 @@ test("告警通道全缺报错", () => {
   delete env.PUSHPLUS;
   expect(() => loadEnv(env)).toThrow("告警通道");
 });
+
+test("ALERT_COOLDOWN 默认 14400，可自定义", () => {
+  expect(loadEnv(FULL).ALERT_COOLDOWN).toBe(14400);
+  expect(loadEnv({ ...FULL, ALERT_COOLDOWN: "7200" }).ALERT_COOLDOWN).toBe(7200);
+});
