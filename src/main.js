@@ -8,25 +8,31 @@ import Watch from "./Watch.js";
 import send from "./send.js";
 import SRV from "./SRV.js";
 import { WATCHDOG } from "./env.js";
+import noOverlap from "./noOverlap.js";
 
 // systemd 看门狗心跳：一轮跑完才发，主循环卡死则 WatchdogSec 后被 systemd 杀掉重启
 const alive = WATCHDOG
   ? () => Bun.spawn(["systemd-notify", "--pid=" + process.pid, "WATCHDOG=1"])
   : () => {};
 
+// 一轮最坏约 65s（30s 超时 + 5s + 重试 30s），会超过 60s 间隔：上一轮未结束就跳过本轮，
+// 避免同一探测并发执行读到过期状态；跳过的轮次不发看门狗心跳，单轮卡死也会被 systemd 发现
 const TASK = new Map(),
-  watch = async () => {
-    try {
-      await Watch(TASK);
-    } catch (e) {
+  watch = noOverlap(
+    async () => {
       try {
-        await send("❌ 监控自身异常", "本轮部分步骤失败：" + e.message);
-      } catch (err) {
-        console.error("send", err);
+        await Watch(TASK);
+      } catch (e) {
+        try {
+          await send("❌ 监控自身异常", "本轮部分步骤失败：" + e.message);
+        } catch (err) {
+          console.error("send", err);
+        }
       }
-    }
-    alive();
-  };
+      alive();
+    },
+    () => console.log("⏭ 上一轮未结束，跳过本轮"),
+  );
 
 await Promise.all(
   Object.entries(loadYml("watch")).map(async ([srv_tag, args]) => {

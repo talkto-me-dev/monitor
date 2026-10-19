@@ -49,6 +49,7 @@ monitor/
 │   ├── loadEnv.js     # env → 配置对象（纯函数）
 │   ├── SRV.js         # 服务注册表：mysql / nginx / redis_sentinel / smtp / http / ssl
 │   ├── Watch.js       # 每轮执行：并发 ping 所有任务 → statusWatch
+│   ├── noOverlap.js   # 定时任务防重叠：上一轮未结束就跳过本轮
 │   ├── ping.js        # 单次探测：线程池执行 → 成功/失败处理 + 跨轮状态通道（delta 型探测用）
 │   ├── statusWatch.js # 监控自身：检查 cloudflare monitor-watch 是否存活
 │   ├── stateBuild.js  # 纯函数：TASK + ERR + VPS_ID_IP + OK_SINCE → 状态快照对象（无 import，可单测）
@@ -134,6 +135,8 @@ main.js 启动
   → 对每个 srv_tag：查/建 srv_id → 按 SRV[srv] 解析参数 → push 到 TASK Map
   → 立即执行 watch() + setInterval 60s 循环；每轮结束发 systemd 看门狗心跳（systemd-notify），
     5 分钟没有心跳（主循环卡死）systemd 即杀掉重启
+  → 上一轮未结束（一轮最坏约 65s）则跳过本轮（log ⏭，src/noOverlap.js），同一探测不会并发执行；
+    跳过的轮次不发心跳，某一轮卡死也会被看门狗发现
 
 watch()
   → 遍历 TASK，并发执行 ping()（allSettled：单个探测落库出错不影响其余探测的通知；落库失败的探测内存状态不变，下一轮重试）
