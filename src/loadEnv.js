@@ -27,6 +27,8 @@ export default (env) => {
     STATUS_PAGE: env.STATUS_PAGE,
   };
   conf.ALERT_COOLDOWN = +(env.ALERT_COOLDOWN || 14400);
+  // systemd 配了 WatchdogSec 时注入；本地 dev 不存在
+  conf.WATCHDOG = !!env.WATCHDOG_USEC;
 
   if (!conf.LARK && !conf.PUSHPLUS) {
     throw new Error("LARK 和 PUSHPLUS 至少配置一个告警通道");

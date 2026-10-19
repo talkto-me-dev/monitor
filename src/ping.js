@@ -12,11 +12,16 @@ import recover from "./db/recover.js";
 // 无状态探测无返回值、失败直接 throw，不受影响（末位多收到一个 undefined）。
 const STATE = new Map();
 
+// 待确认故障：srv_id → (vps_id → 首次失败 ts)。新故障要连续两轮失败才告警，过滤分钟级网络抖动
+const PENDING = new Map();
+
 const RETRY_DELAY = 5e3;
 
+// 返回本轮要通知的事件（由 Watch 汇总成一张卡片发送），无事件返回 undefined
 export default async (now, srv, tag, srv_id, vps, args) => {
   const errmap = ERR.default(srv_id, () => new Map()),
     state = STATE.default(srv_id, () => new Map()),
+    pending = PENDING.default(srv_id, () => new Map()),
     vps_is_array = Array.isArray(vps);
 
   const [vps_id] = vps_is_array ? VPS_ID_IP.get(vps[0]) : VPS_ID_IP.get(vps);
@@ -40,11 +45,14 @@ export default async (now, srv, tag, srv_id, vps, args) => {
     }
   };
 
+  // 有状态探测的业务告警（如每分钟 5xx 增量）本身就是单轮窗口事件，不做两轮确认
+  let stateful_err = false,
+    err;
   try {
     let ret;
     try {
       ret = await runProbe();
-    } catch (_firstErr) {
+    } catch {
       // 网络瞬断：等 5s 重试一次，过滤误报
       log("⟳", srv_name, "retry in 5s");
       await new Promise((r) => setTimeout(r, RETRY_DELAY));
@@ -55,25 +63,36 @@ export default async (now, srv, tag, srv_id, vps, args) => {
     if (Array.isArray(ret)) {
       const [err_li, st] = ret;
       state.set(vps_id, st);
+      stateful_err = !!err_li?.length;
       raise(err_li);
     }
-    if (pre_err) {
-      errmap.delete(vps_id);
-      await recover(now, srv_name, srv_id, vps_id, pre_err);
-    } else {
-      log("✅", srv_name);
-    }
-  } catch (err) {
-    if (err.name == "AbortError") {
-      err = "timeout";
-    } else {
-      err = err.toString();
-      if (err.startsWith("Error: ")) {
-        err = err.slice(7);
-      }
-    }
-
-    await errIngNew(now, errmap, err, srv_name, srv_id, vps_id);
-    console.error("❌", srv_name, err);
+  } catch (e) {
+    err = e.name == "AbortError" ? "timeout" : String(e).replace(/^Error: /, "");
   }
+
+  // 以下内存状态都在落库成功后才清：落库失败时 ping 抛错，下一轮按原状态重试（SQL 幂等）
+  if (err === undefined) {
+    pending.delete(vps_id);
+    if (pre_err) {
+      const ev = await recover(now, srv_name, srv_id, vps_id, pre_err);
+      errmap.delete(vps_id);
+      return ev;
+    }
+    log("✅", srv_name);
+    return;
+  }
+
+  let begin = now;
+  if (!pre_err && !stateful_err) {
+    if (!pending.has(vps_id)) {
+      pending.set(vps_id, now);
+      log("⏳", srv_name, err, "（待下一轮确认）");
+      return;
+    }
+    begin = pending.get(vps_id);
+  }
+  console.error("❌", srv_name, err);
+  const ev = await errIngNew(now, begin, errmap, err, srv_name, srv_id, vps_id);
+  pending.delete(vps_id);
+  return ev;
 };

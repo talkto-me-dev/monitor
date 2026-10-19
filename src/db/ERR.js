@@ -1,6 +1,7 @@
 import DB from "../DB.js";
 
-// srv_id : vps_id :  [err, ts, errIng_id, txt_id]
+// srv_id : vps_id : [err, begin 故障起始秒, errIng_id, txt_id, last_alert 上次通知秒]
+// 启动时从 errIng 表加载：begin 为 bigint 字符串，且没有 last_alert（证书冷却回落到 begin）
 
 const ERR = new Map();
 

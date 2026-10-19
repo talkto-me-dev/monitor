@@ -13,7 +13,11 @@ const statusWatch = async (now) => {
     now_minute = int(now / 60);
   p.get("status-watch:ts");
   p.setex("status:ts", 864e3, now_minute);
-  const status_watch_minute = (await p.exec())[0][1];
+  // pipeline 不会因 Redis 不可用而 reject，错误在每条结果的第 0 位
+  const [[err, status_watch_minute]] = await p.exec();
+  if (err) {
+    raise("Redis 不可用，无法检查心跳：" + err.message);
+  }
   if (!status_watch_minute) {
     raise("Redis 中没有 monitor-watch 的心跳（可能未部署，或已停摆超过心跳过期时间）");
   }

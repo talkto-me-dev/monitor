@@ -9,27 +9,27 @@ export default async ({ host, user, password, vps }) => {
     ipCheck = (name, ip, li) => {
       const pos = li.indexOf(ip);
       if (pos < 0) {
-        err_li.push("域名解析缺失 " + name + " " + ip);
-      } else {
-        li.splice(pos, 1);
+        return "域名解析缺失 " + name + " " + ip;
+      }
+      li.splice(pos, 1);
+    },
+    smtpCheck = async (name, ip) => {
+      try {
+        await tlsSmtp(user, password, ip, host);
+      } catch (err) {
+        return host + " SMTP 异常 : " + name + " " + ip + " " + err;
       }
     };
   for (const [name, { v4, v6 }] of vps) {
-    await Promise.all(
-      [v4, v6].map(async (ip, pos) =>
-        Promise.all([
-          ipCheck(name, ip, ip_li_li[pos]),
-
-          (async () => {
-            try {
-              await tlsSmtp(user, password, ip, host);
-            } catch (err) {
-              err_li.push(host + " SMTP 异常 : " + name + " " + ip + " " + err);
-            }
-          })(),
-        ]),
-      ),
+    // v4/v6 并发探测，但错误按「机器 → v4 → v6」固定顺序拼接：
+    // 按完成先后 push 会让同一故障每轮文本不同，绕过 errIngNew 的文本去重反复告警
+    const li = await Promise.all(
+      [v4, v6].map(async (ip, pos) => [
+        ipCheck(name, ip, ip_li_li[pos]),
+        await smtpCheck(name, ip),
+      ]),
     );
+    err_li.push(...li.flat().filter(Boolean));
   }
   for (const li of ip_li_li) {
     if (li.length) {

@@ -11,6 +11,9 @@ ExecStart=bun ./src/main.js
 PrivateTmp=true
 Restart=always
 RestartSec=10
+# 看门狗：主循环每轮结束发心跳（src/main.js），5 分钟没有心跳即判定卡死，杀掉重启
+WatchdogSec=300
+NotifyAccess=all
 
 [Install]
 WantedBy=multi-user.target

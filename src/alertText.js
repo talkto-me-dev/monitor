@@ -32,16 +32,12 @@ export const dt8 = (ts) => {
 export const errText = (err, pre) =>
   pre ? "**错误**：" + err + "\n**此前**：" + pre[0] + "（" + dt8(pre[1]) + " 起）" : err;
 
-// 恢复通知正文：故障时段 + 错误内容 + 其余进行中异常明细（remain: [srv名, vps主机名, 起始ts]）
-export const recoverText = (now, begin, err, remain) => {
-  let txt = "**故障时长**：" + dur(now - begin) + "（" + dt8(begin) + " → " + dt8(now) + "）";
-  if (err) {
-    txt += "\n**错误内容**：" + err;
-  }
+// 其余进行中异常明细（remain: [srv名, vps主机名, 起始ts]），无剩余时给 🎉
+const remainText = (now, remain) => {
   if (!remain.length) {
-    return txt + "\n\n🎉 全部服务已恢复正常";
+    return "\n\n🎉 全部服务已恢复正常";
   }
-  txt += "\n\n**其余 " + remain.length + " 个异常仍在持续**：";
+  let txt = "\n\n**其余 " + remain.length + " 个异常仍在持续**：";
   for (const [name, vps, ts] of remain.slice(0, 10)) {
     // 落点与服务名重复时（域名/云端实例类监控）不重复展示
     const at = name == vps || name.endsWith("/" + vps) ? "" : " · " + vps;
@@ -51,4 +47,28 @@ export const recoverText = (now, begin, err, remain) => {
     txt += "\n- …等共 " + remain.length + " 个";
   }
   return txt;
+};
+
+// 单条恢复：故障时段 + 错误内容
+const recoverHead = (now, begin, err) => {
+  const txt = "**故障时长**：" + dur(now - begin) + "（" + dt8(begin) + " → " + dt8(now) + "）";
+  return err ? txt + "\n**错误内容**：" + err : txt;
+};
+
+// 一轮内的多条事件合并成一张卡片：每条以服务名加粗起头，空行分隔（错误文本可能多行）
+const merge = (li, body) => li.map((e) => "**" + e.name + "**\n" + body(e)).join("\n\n");
+
+// 故障卡片 [标题, 正文]；li: [{ name, err, pre }]，只有一条时沿用单条文案
+export const errCard = (li) =>
+  li.length == 1
+    ? ["❌ " + li[0].name + " 故障", errText(li[0].err, li[0].pre)]
+    : ["❌ " + li.length + " 个服务故障", merge(li, (e) => errText(e.err, e.pre))];
+
+// 恢复卡片 [标题, 正文]；li: [{ name, begin, err }]，只有一条时沿用单条文案，其余进行中异常统一附在末尾
+export const recoverCard = (now, li, remain) => {
+  const [title, body] =
+    li.length == 1
+      ? ["✅ " + li[0].name + " 已恢复", recoverHead(now, li[0].begin, li[0].err)]
+      : ["✅ " + li.length + " 个服务已恢复", merge(li, (e) => recoverHead(now, e.begin, e.err))];
+  return [title, body + remainText(now, remain)];
 };

@@ -1,11 +1,15 @@
-import Redis from "@3-/ioredis";
+import Redis from "ioredis";
 import pair from "@3-/pair";
 import raise from "@3-/raise";
-// import int from "@3-/int";
 
+// 一次性连接：不重连、用完即断。连接常驻会每轮泄漏一条，断网时这些连接一起重连报错
 const redisGet = async (cluster, conf) => {
-  const s = Redis(conf),
+  let last_err;
+  const s = new Redis({ ...conf, retryStrategy: () => null }),
     p = s.pipeline();
+  s.on("error", (err) => {
+    last_err = err;
+  });
 
   cluster.forEach((name) => {
     p.sentinel("slaves", name);
@@ -13,7 +17,20 @@ const redisGet = async (cluster, conf) => {
   });
 
   p.info("sentinel");
-  return (await p.exec()).map(([_, i]) => i);
+  try {
+    const li = await p.exec(),
+      err = li.find(([e]) => e)?.[0];
+    if (err) {
+      // 连不上时每条命令只带 "Connection is closed."，抛真实的连接错误
+      throw last_err ?? err;
+    }
+    return li.map(([_, i]) => i);
+  } finally {
+    // 连接失败时已是 end：再 disconnect 会白挂一个 2s 的 disconnectTimeout 定时器
+    if (s.status != "end") {
+      s.disconnect();
+    }
+  }
 };
 
 export default async ({ port, password, cluster, vps }, ip_name) => {

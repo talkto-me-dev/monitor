@@ -30,13 +30,13 @@ set -ex
 cd /opt/monitor
 chmod 600 .env
 bun i
+cp monitor.service /etc/systemd/system/
+systemctl daemon-reload
 systemctl restart monitor
 sleep 3
 systemctl is-active --quiet monitor || { journalctl -u monitor -n 20 --no-pager; exit 1; }
 "'
 
-# 首次安装：
-# cp monitor.service /etc/systemd/system/
-# systemctl daemon-reload
+# 首次安装（unit 文件每次部署都会同步，首次只需 enable）：
 # systemctl enable monitor
 # 旧服务退役：systemctl disable --now status && rm -rf /opt/status /opt/conf

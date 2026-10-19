@@ -65,3 +65,8 @@ test("ALERT_COOLDOWN 默认 14400，可自定义", () => {
   expect(loadEnv(FULL).ALERT_COOLDOWN).toBe(14400);
   expect(loadEnv({ ...FULL, ALERT_COOLDOWN: "7200" }).ALERT_COOLDOWN).toBe(7200);
 });
+
+test("WATCHDOG：仅 systemd 注入 WATCHDOG_USEC 时开启", () => {
+  expect(loadEnv(FULL).WATCHDOG).toBe(false);
+  expect(loadEnv({ ...FULL, WATCHDOG_USEC: "300000000" }).WATCHDOG).toBe(true);
+});

@@ -12,11 +12,11 @@
 | ------ | --------------------------------------------------------------------------------------------------- |
 | 运行时 | **Bun**（非 Node，因 fetch 需要 proxy 参数；DB 驱动用内置 `Bun.sql`）                               |
 | 数据库 | **PostgreSQL**（`Bun.sql` 原生驱动，零额外依赖，库名 `status`）                                     |
-| 缓存   | **Redis**（ioredis）                                                                                |
+| 缓存   | **Redis**（ioredis，直接用官方包：永不放弃重连、命令 10s 超时，Redis 不可用只影响快照/心跳）        |
 | 线程池 | **Piscina**（每种探测任务在 worker 线程执行，idle 90s）                                             |
 | 配置   | `.env`（唯一秘密来源）+ `conf/watch.yml`（秘密用 `${VAR}` 占位符）+ `conf/ip.json`；conf/ 不入仓    |
 | 告警   | 飞书交互卡片（`src/larkCard.js`，emoji 定色，页脚带状态页链接）+ PushPlus（`@8v/send`），至少配一个 |
-| 部署   | systemd service，`deploy.sh` SSH 到 VPS 拉代码 + scp .env 和 conf/ + 重启                           |
+| 部署   | systemd service（含 5 分钟看门狗），`deploy.sh` SSH 到 VPS 拉代码 + scp .env 和 conf/ + 重启        |
 | 开发   | `watchexec` 监听 `src/*.js` 变动，自动 `oxfmt` → `oxlint` → 运行                                    |
 
 ---
@@ -57,14 +57,15 @@ monitor/
 │   ├── send.js        # 告警发送（飞书卡片 + PushPlus，任一失败抛错）
 │   ├── larkCard.js    # 飞书交互卡片：❌红 ✅绿 ⚠️橙 默认蓝，页脚 = STATUS_PAGE 链接
 │   ├── DB.js          # PostgreSQL 连接（Bun.sql），导出 q / isDup
-│   ├── R.js           # Redis 连接
+│   ├── R.js           # Redis 连接（永不放弃重连 + 命令超时，断网不会打挂进程）
+│   ├── notify.js      # 一轮的事件汇总发送：故障一张卡、恢复一张卡
 │   ├── loadYml.js     # 从 conf/ 加载 YAML + ${VAR} 环境变量插值
 │   ├── loadJson.js    # 从 conf/ 加载 JSON
 │   ├── ping/          # 具体探测实现（每种服务一个文件；dohData.js 为 DoH 查询工具，零记录时返回空数组）
 │   ├── db/            # 数据库操作
 │   │   ├── ERR.js         # 内存异常状态（启动时从 errIng 表加载）
-│   │   ├── errIngNew.js   # 新异常：upsert errIng + 推送告警
-│   │   ├── recover.js     # 恢复：删 errIng → 写 errFixed → 推送恢复通知 + 更新 OK_SINCE
+│   │   ├── errIngNew.js   # 新异常：upsert errIng，返回待通知事件（同文本/证书冷却期内不返回）
+│   │   ├── recover.js     # 恢复：删 errIng → 写 errFixed → 更新 OK_SINCE，返回待通知事件
 │   │   ├── OK_SINCE.js    # "srv_id:vps_id" → 上次异常结束时刻（启动查 errFixed，供状态页"持续正常"）
 │   │   ├── VPS_ID_IP.js   # hostname → [id, ip]（启动时同步到 DB）
 │   │   ├── VPS_IP.js / VPS_IP_NAME.js
@@ -80,7 +81,7 @@ monitor/
 ├── deploy.sh          # 部署：拉代码 + scp .env 和 conf/ + 重启
 ├── dev.sh             # 开发热重载（项目根运行，bun 自动加载 .env）
 ├── log.sh             # 查看 journalctl 日志
-└── monitor.service    # systemd 服务配置（无需 EnvironmentFile）
+└── monitor.service    # systemd 服务配置（无需 EnvironmentFile；WatchdogSec 看门狗）
 ```
 
 ---
@@ -131,23 +132,31 @@ main.js 启动
   → env.js 校验 .env（缺项即挂）
   → loadYml("watch")：解析 conf/watch.yml + ${VAR} 占位符替换
   → 对每个 srv_tag：查/建 srv_id → 按 SRV[srv] 解析参数 → push 到 TASK Map
-  → 立即执行 watch() + setInterval 60s 循环
+  → 立即执行 watch() + setInterval 60s 循环；每轮结束发 systemd 看门狗心跳（systemd-notify），
+    5 分钟没有心跳（主循环卡死）systemd 即杀掉重启
 
 watch()
-  → 遍历 TASK，并发执行 ping()
-  → ping():
+  → 遍历 TASK，并发执行 ping()（allSettled：单个探测落库出错不影响其余探测的通知；落库失败的探测内存状态不变，下一轮重试）
+  → ping()：只落库并返回待通知事件，不直接发消息
     → Piscina worker 线程执行 ping/{srv}.js（30s 超时 AbortController；上一轮 state 作为末位参数回传）
+    → 失败先等 5s 重试一次，过滤秒级网络瞬断
     → 有状态探测（delta 型，如 nginx）返回 [err_li, state]：state 先存再 raise（告警轮基线也前移）
-    → 成功 + 之前有异常 → recover（删 errIng → 写 errFixed → 推送 ✅：故障时段/错误内容/其余异常明细，文案在 src/alertText.js 纯函数）
-    → 成功 + 无异常 → log ✅
-    → 失败 + 与上次相同错误文本 → 跳过（不重复告警）
-    → 失败 + 新错误 → errIngNew（upsert errIng → 推送 ❌）
+    → 成功 + 之前有异常 → recover（删 errIng → 写 errFixed）→ 恢复事件
+    → 成功 + 无异常 → log ✅（若上一轮是待确认的失败，直接丢弃，不告警也不发恢复）
+    → 失败 + 新故障 → 第一轮只记为「待确认」（log ⏳），连续第二轮仍失败才 errIngNew → 故障事件，
+      故障起始时间取首次失败时刻；过滤分钟级网络抖动
+      例外（立即上报）：有状态探测的业务告警（如每分钟 5xx 增量，本身是单轮窗口事件，等两轮会漏掉）
+    → 失败 + 已在故障中 + 与上次相同错误文本 → 跳过（不重复告警）
+    → 失败 + 已在故障中 + 错误文本变化 → 立即上报（起始时间沿用原故障，不重置）
+  → notify()：本轮所有故障合并成一张 ❌ 卡片，所有恢复合并成一张 ✅ 卡片（附其余进行中异常明细）；
+    只有一条时沿用单条文案（标题带服务名）。文案在 src/alertText.js 纯函数
+  → 探测落库失败、通知发送失败在轮末汇总抛出（快照与心跳照常执行），main 推「❌ 监控自身异常」
   → stateSnapshot()：全量状态快照写 Redis status:state（供 monitor-watch 状态页读取）
     可用率行名 = srv 表键名（顶层键），不用 push 的 tag 拼（tag 留空的类型会同名互吞）
   → statusWatch():
     → 读 Redis key `status-watch:ts`，检查 cloudflare status-watch 最后心跳
     → 写 `status:ts` 作为自身心跳
-    → 若失联/未运行，在内部 catch 并发送告警（首次发生时通知，后续静默，不重复轰炸且不向外抛错，保证主程序不崩溃）
+    → 若失联/未运行（含 Redis 不可用），发送告警（首次发生时通知，后续静默，不重复轰炸）；探测本身的异常不外抛，告警发送失败会抛出，由 main 推「监控自身异常」
 ```
 
 ---
@@ -160,7 +169,8 @@ watch()
 
 ## 测试
 
-- `bun test`：单元测试（`test/*.test.js`，覆盖 loadEnv 装配校验、yml 占位符插值），不连外部服务
+- `bun test`：单元测试（`test/*.test.js`，不连外部服务；DB/Redis/告警通道用 `mock.module` 隔离）。覆盖配置装配、yml 插值、各探测、告警文案、两轮确认与按轮合并（ping/Watch/notify/errIngNew/recover/statusWatch）
+- 测试约定：bun 在同一进程跑所有测试文件，`mock.module` 会跨文件生效；被测模块若在别的测试文件里被 mock 过，用 `import("../src/x.js?real")` 取真实实现
 - `bun test/R.js`：Redis 手工冒烟（连真实 Redis）
 - 本地整体验证：`./dev.sh`（连本地 docker PG `status-pg` + 真实 Redis，会真实推送告警——调试时可用环境变量覆盖 `LARK` 指向 mock）
 
@@ -170,8 +180,8 @@ watch()
 
 - 部署目标：`.env` 的 `DEPLOY_VPS`（ssh 别名）
 - 服务器路径：`/opt/monitor`；代码托管 `github.com:talkto-me-dev/monitor.git`（`main` 分支）
-- 流程：`deploy.sh` → SSH 拉代码 → `scp .env` 与 `conf/` 到 `/opt/monitor/`（.env chmod 600）→ `bun i` → `systemctl restart monitor`
-- systemd：`monitor.service`，`WorkingDirectory=/opt/monitor`，bun 自动加载该目录下 `.env`，无需 EnvironmentFile；首次安装见 deploy.sh 尾部注释（含旧 status 服务退役步骤）
+- 流程：`deploy.sh` → SSH 拉代码 → `scp .env` 与 `conf/` 到 `/opt/monitor/`（.env chmod 600）→ `bun i` → 同步 unit 文件 + `daemon-reload` → `systemctl restart monitor`
+- systemd：`monitor.service`（每次部署由 deploy.sh 同步到 `/etc/systemd/system/` 并 daemon-reload），`WorkingDirectory=/opt/monitor`，bun 自动加载该目录下 `.env`，无需 EnvironmentFile；`WatchdogSec=300` + `NotifyAccess=all`，主循环每轮结束用 `systemd-notify --pid` 发心跳，卡死 5 分钟即被重启；首次安装见 deploy.sh 尾部注释（含旧 status 服务退役步骤）
 - 全新数据库初始化：`psql < backup/schema.sql`（历史上曾有 TiDB→PG 迁移脚本 backup/migrate.js，2026-07 全新上线未迁移历史数据，已删除）
 
 ---

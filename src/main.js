@@ -7,14 +7,25 @@ import srvId from "./db/srvId.js";
 import Watch from "./Watch.js";
 import send from "./send.js";
 import SRV from "./SRV.js";
+import { WATCHDOG } from "./env.js";
+
+// systemd 看门狗心跳：一轮跑完才发，主循环卡死则 WatchdogSec 后被 systemd 杀掉重启
+const alive = WATCHDOG
+  ? () => Bun.spawn(["systemd-notify", "--pid=" + process.pid, "WATCHDOG=1"])
+  : () => {};
 
 const TASK = new Map(),
   watch = async () => {
     try {
       await Watch(TASK);
     } catch (e) {
-      await send("❌ 监控自身异常", "本轮探测未完成，异常：" + e);
+      try {
+        await send("❌ 监控自身异常", "本轮部分步骤失败：" + e.message);
+      } catch (err) {
+        console.error("send", err);
+      }
     }
+    alive();
   };
 
 await Promise.all(
