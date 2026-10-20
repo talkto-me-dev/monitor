@@ -50,7 +50,7 @@ monitor/
 │   ├── SRV.js         # 服务注册表：mysql / nginx / redis_sentinel / smtp / http / ssl
 │   ├── Watch.js       # 每轮执行：并发 ping 所有任务 → statusWatch
 │   ├── noOverlap.js   # 定时任务防重叠：上一轮未结束就跳过本轮
-│   ├── memLog.js      # 内存排查日志（每 10 分钟一行 🧠：rss（含工作线程）/主线程堆/主线程堆外内存/线程新建销毁数/对象类型前 5）
+│   ├── memLog.js      # 内存排查日志（每 10 分钟一行 🧠：rss（含工作线程）/主线程堆/主线程堆外内存/工作线程堆合计/线程新建销毁数/对象类型前 5）
 │   ├── ping.js        # 单次探测：线程池执行 → 成功/失败处理 + 跨轮状态通道（delta 型探测用）
 │   ├── statusWatch.js # 监控自身：检查 cloudflare monitor-watch 是否存活
 │   ├── stateBuild.js  # 纯函数：TASK + ERR + VPS_ID_IP + OK_SINCE → 状态快照对象（无 import，可单测）
@@ -138,7 +138,8 @@ main.js 启动
     5 分钟没有心跳（主循环卡死）systemd 即杀掉重启
   → 上一轮未结束（一轮最坏约 65s）则跳过本轮（log ⏭，src/noOverlap.js），同一探测不会并发执行；
     跳过的轮次不发心跳，某一轮卡死也会被看门狗发现
-  → 每 10 分钟打一行 🧠 内存日志（src/memLog.js），用于排查进程内存持续增长（约 14MB/小时）
+  → 每 10 分钟打一行 🧠 内存日志（src/memLog.js），用于排查进程内存持续增长（约 14MB/小时）；
+    工作线程每次任务结束经 Piscina 消息通道上报自身堆大小（src/var/worker.js），日志中 workers 为其合计
 
 watch()
   → 遍历 TASK，并发执行 ping()（allSettled：单个探测落库出错不影响其余探测的通知；落库失败的探测内存状态不变，下一轮重试）
@@ -174,8 +175,8 @@ watch()
 
 ## 测试
 
-- `bun test`：单元测试（`test/*.test.js`，不连外部服务；DB/Redis/告警通道用 `mock.module` 隔离）。覆盖配置装配、yml 插值、各探测、告警文案、两轮确认与按轮合并（ping/Watch/notify/errIngNew/recover/statusWatch）
-- 测试约定：bun 在同一进程跑所有测试文件，`mock.module` 会跨文件生效；被测模块若在别的测试文件里被 mock 过，用 `import("../src/x.js?real")` 取真实实现
+- `bun test`：单元测试（`test/*.test.js`，不连外部服务；DB/Redis/告警通道用 `mock.module` 隔离）。覆盖配置装配、yml 插值、各探测、告警文案、两轮确认与按轮合并（ping/Watch/notify/errIngNew/recover/statusWatch）、内存排查日志与工作线程堆上报（memLog/worker）
+- 测试约定：bun 在同一进程跑所有测试文件，`mock.module` 会跨文件生效；被测模块若在别的测试文件里被 mock 过，用 `import("../src/x.js?real")` 取真实实现；`mock.module` 也会替换系统模块（如 `node:worker_threads`）并波及其他文件，测线程内行为用真实 Piscina + `test/fixture/` 假探测（见 test/worker.test.js）
 - `bun test/R.js`：Redis 手工冒烟（连真实 Redis）
 - 本地整体验证：`./dev.sh`（连本地 docker PG `status-pg` + 真实 Redis，会真实推送告警——调试时可用环境变量覆盖 `LARK` 指向 mock）
 
