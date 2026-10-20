@@ -50,7 +50,7 @@ monitor/
 │   ├── SRV.js         # 服务注册表：mysql / nginx / redis_sentinel / smtp / http / ssl
 │   ├── Watch.js       # 每轮执行：并发 ping 所有任务 → statusWatch
 │   ├── noOverlap.js   # 定时任务防重叠：上一轮未结束就跳过本轮
-│   ├── memLog.js      # 内存排查日志（每 10 分钟一行 🧠：rss/主线程堆/底层内存/线程新建销毁数/对象类型前 5）
+│   ├── memLog.js      # 内存排查日志（每 10 分钟一行 🧠：rss（含工作线程）/主线程堆/主线程堆外内存/线程新建销毁数/对象类型前 5）
 │   ├── ping.js        # 单次探测：线程池执行 → 成功/失败处理 + 跨轮状态通道（delta 型探测用）
 │   ├── statusWatch.js # 监控自身：检查 cloudflare monitor-watch 是否存活
 │   ├── stateBuild.js  # 纯函数：TASK + ERR + VPS_ID_IP + OK_SINCE → 状态快照对象（无 import，可单测）

@@ -1,5 +1,6 @@
-// 内存排查日志：打印主线程堆、Bun 底层内存和线程池新建/销毁次数，
-// 用来区分内存增长来自主线程对象堆积还是工作线程反复新建
+// 内存排查日志：heap/extra 只统计主线程（extra 是 ArrayBuffer 等堆外内存），
+// rss 是整个进程、包含每个工作线程各自的 JS 堆；rss 远大于 heap 时差值在工作线程或原生内存里，
+// 配合 threads/destroyed 判断是不是线程反复新建造成的
 import { heapStats } from "bun:jsc";
 
 const MB = (n) => Math.round(n / 1048576) + "MB";

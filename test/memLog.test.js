@@ -22,7 +22,7 @@ test("输出一行：内存各项、当前线程数、累计新建/销毁次数�
   const [line, ...rest] = capture(mem);
   expect(rest).toEqual([]);
   expect(line).toMatch(
-    /^🧠 rss=\d+MB heap=\d+MB extra=\d+MB objects=\d+ threads=3 created=4 destroyed=1 top=(\S+:\d+,){4}\S+:\d+$/,
+    /^🧠 rss=\d+MB heap=\d+MB extra=\d+MB objects=\d+ threads=3 created=4 destroyed=1 top=([^,]+:\d+,){4}[^,]+:\d+$/,
   );
 });
 
@@ -46,4 +46,20 @@ test("订阅前已存在的线程计入新建；销毁只计订阅之后的；�
   b.threads.push({});
   expect(capture(mem_a)[0]).toContain("threads=5 created=5 destroyed=0");
   expect(capture(mem_b)[0]).toContain("threads=3 created=5 destroyed=2");
+});
+
+test("字节按 1048576 换算成 MB 并四舍五入", () => {
+  const spy = spyOn(process, "memoryUsage");
+  try {
+    for (const [bytes, want] of [
+      [1.5 * 1048576, "rss=2MB "],
+      [1.49 * 1048576, "rss=1MB "],
+      [0, "rss=0MB "],
+    ]) {
+      spy.mockReturnValue({ rss: bytes });
+      expect(capture(memLog(fakePool(0)))[0]).toStartWith("🧠 " + want);
+    }
+  } finally {
+    spy.mockRestore();
+  }
 });
