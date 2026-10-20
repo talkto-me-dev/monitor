@@ -50,6 +50,7 @@ monitor/
 │   ├── SRV.js         # 服务注册表：mysql / nginx / redis_sentinel / smtp / http / ssl
 │   ├── Watch.js       # 每轮执行：并发 ping 所有任务 → statusWatch
 │   ├── noOverlap.js   # 定时任务防重叠：上一轮未结束就跳过本轮
+│   ├── memLog.js      # 内存排查日志（每 10 分钟一行 🧠：rss/主线程堆/底层内存/线程新建销毁数/对象类型前 5）
 │   ├── ping.js        # 单次探测：线程池执行 → 成功/失败处理 + 跨轮状态通道（delta 型探测用）
 │   ├── statusWatch.js # 监控自身：检查 cloudflare monitor-watch 是否存活
 │   ├── stateBuild.js  # 纯函数：TASK + ERR + VPS_ID_IP + OK_SINCE → 状态快照对象（无 import，可单测）
@@ -137,6 +138,7 @@ main.js 启动
     5 分钟没有心跳（主循环卡死）systemd 即杀掉重启
   → 上一轮未结束（一轮最坏约 65s）则跳过本轮（log ⏭，src/noOverlap.js），同一探测不会并发执行；
     跳过的轮次不发心跳，某一轮卡死也会被看门狗发现
+  → 每 10 分钟打一行 🧠 内存日志（src/memLog.js），用于排查进程内存持续增长（约 14MB/小时）
 
 watch()
   → 遍历 TASK，并发执行 ping()（allSettled：单个探测落库出错不影响其余探测的通知；落库失败的探测内存状态不变，下一轮重试）
@@ -184,7 +186,7 @@ watch()
 - 部署目标：`.env` 的 `DEPLOY_VPS`（ssh 别名）
 - 服务器路径：`/opt/monitor`；代码托管 `github.com:talkto-me-dev/monitor.git`（`main` 分支）
 - 流程：`deploy.sh` → SSH 拉代码 → `scp .env` 与 `conf/` 到 `/opt/monitor/`（.env chmod 600）→ `bun i` → 同步 unit 文件 + `daemon-reload` → `systemctl restart monitor`
-- systemd：`monitor.service`（每次部署由 deploy.sh 同步到 `/etc/systemd/system/` 并 daemon-reload），`WorkingDirectory=/opt/monitor`，bun 自动加载该目录下 `.env`，无需 EnvironmentFile；`WatchdogSec=300` + `NotifyAccess=all`，主循环每轮结束用 `systemd-notify --pid` 发心跳，卡死 5 分钟即被重启；首次安装见 deploy.sh 尾部注释（含旧 status 服务退役步骤）
+- systemd：`monitor.service`（每次部署由 deploy.sh 同步到 `/etc/systemd/system/` 并 daemon-reload），`WorkingDirectory=/opt/monitor`，bun 自动加载该目录下 `.env`，无需 EnvironmentFile；`WatchdogSec=300` + `NotifyAccess=all`，主循环每轮结束用 `systemd-notify --pid` 发心跳，卡死 5 分钟即被重启；`MemoryMax=800M` 内存兜底，超限被杀后由 `Restart=always` 拉起；首次安装见 deploy.sh 尾部注释（含旧 status 服务退役步骤）
 - 全新数据库初始化：`psql < backup/schema.sql`（历史上曾有 TiDB→PG 迁移脚本 backup/migrate.js，2026-07 全新上线未迁移历史数据，已删除）
 
 ---

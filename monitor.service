@@ -14,6 +14,8 @@ RestartSec=10
 # 看门狗：主循环每轮结束发心跳（src/main.js），5 分钟没有心跳即判定卡死，杀掉重启
 WatchdogSec=300
 NotifyAccess=all
+# 内存兜底：超过上限被系统杀掉，由 Restart=always 拉起（排查内存增长期间防止吃满机器）
+MemoryMax=800M
 
 [Install]
 WantedBy=multi-user.target
