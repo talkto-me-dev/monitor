@@ -1,7 +1,7 @@
 // 内存排查日志：heap/extra 只统计主线程（extra 是 ArrayBuffer 等堆外内存），
 // rss 是整个进程、包含每个工作线程各自的 JS 堆；rss 远大于 heap 时差值在工作线程或原生内存里，
-// 配合 threads/destroyed 判断是不是线程反复新建造成的；workers 是各工作线程最近一次上报的 JS 堆之和
-// （src/var/worker.js 每次任务结束上报），用来区分工作线程堆积和原生内存泄漏
+// 配合 threads/destroyed 判断是不是线程反复新建造成的；workers 是各工作线程最近一次强制 GC 后的 JS 堆之和
+// （src/var/worker.js 每线程每 10 分钟 GC 并上报一次），用来区分工作线程真实堆积和原生内存泄漏
 import { heapStats } from "bun:jsc";
 
 const MB = (n) => Math.round(n / 1048576) + "MB";
